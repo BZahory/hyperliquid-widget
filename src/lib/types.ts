@@ -59,6 +59,8 @@ export interface TradeSlot {
   sz: string;
   time: string;
   side: "buy" | "sell" | "";
+  /** Set when a fresh trade lands here and kept as rows shift, so a shifted row never restarts it. */
+  flash: Flash;
   /** Increments when a fresh trade lands in this slot, so only new fills animate, not shifted ones. */
   flashSeq: number;
 }

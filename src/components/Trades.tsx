@@ -13,14 +13,14 @@ export function Trades() {
   return (
     <div data-testid="trades">
       {trades.map((t, i) => (
-        <TradeRow key={i} kind={kindOf(t)} px={t.px} sz={t.sz} time={t.time} side={t.side} flashSeq={t.flashSeq} />
+        <TradeRow key={i} kind={kindOf(t)} px={t.px} sz={t.sz} time={t.time} side={t.side} flash={t.flash} flashSeq={t.flashSeq} />
       ))}
     </div>
   );
 }
 
-const TradeRow = memo(function TradeRow({ kind, px, sz, time, side, flashSeq }: Omit<TradeSlot, "flashSeq"> & { kind: RowKind; flashSeq: number }) {
-  const flashClass = flashSeq ? ` flash-${side === "buy" ? "up" : "down"}-${flashSeq & 1 ? "a" : "b"}` : "";
+const TradeRow = memo(function TradeRow({ kind, px, sz, time, side, flash, flashSeq }: TradeSlot & { kind: RowKind }) {
+  const flashClass = flash ? ` flash-${flash}-${flashSeq & 1 ? "a" : "b"}` : "";
   return (
     <div className={`row${flashClass}`} data-kind={kind}>
       <span className={`px ${side}`}>{px}</span>

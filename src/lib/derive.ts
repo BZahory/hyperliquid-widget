@@ -33,7 +33,7 @@ export const EMPTY_BOOK: DisplayBook = {
   groupings: [],
 };
 
-const EMPTY_TRADE: TradeSlot = { px: "", sz: "", time: "", side: "", flashSeq: 0 };
+const EMPTY_TRADE: TradeSlot = { px: "", sz: "", time: "", side: "", flash: "", flashSeq: 0 };
 export const EMPTY_TRADES: TradeSlot[] = Array<TradeSlot>(TRADES).fill(EMPTY_TRADE);
 
 const formatters = new Map<number, Intl.NumberFormat>();
@@ -256,12 +256,14 @@ export function deriveTrades(
     }
     const px = Number(t.px);
     const sz = Number(t.sz);
+    const isFresh = i < fresh;
     slots[i] = {
       px: fmt(px, pxDecimals),
       sz: fmt(opts.quote ? sz * px : sz, decimals),
       time: timeFmt.format(t.time),
       side: t.side === "B" ? "buy" : "sell",
-      flashSeq: i < fresh ? prev[i].flashSeq + 1 : prev[i].flashSeq,
+      flash: isFresh ? (t.side === "B" ? "up" : "down") : prev[i].flash,
+      flashSeq: isFresh ? prev[i].flashSeq + 1 : prev[i].flashSeq,
     };
   }
   return slots;

@@ -239,6 +239,14 @@ describe("trades", () => {
     expect(next[1]).toMatchObject({ px: "83,452", flashSeq: 0 }); // shifted, not fresh
   });
 
+  it("keeps a shifted row's flash direction, so a side change below the fresh fills never restarts it", () => {
+    const first = deriveTrades([trade("2.0", "1", "A"), trade("1.0", "1", "B")], 2, EMPTY_TRADES, { szDecimals: 5, quote: false });
+    expect(first.map((t) => t.flash).slice(0, 2)).toEqual(["down", "up"]);
+    const next = deriveTrades([trade("3.0", "1", "B"), trade("2.0", "1", "A"), trade("1.0", "1", "B")], 1, first, { szDecimals: 5, quote: false });
+    expect(next[0]).toMatchObject({ side: "buy", flash: "up", flashSeq: 2 });
+    expect(next[1]).toMatchObject({ side: "sell", flash: "up", flashSeq: 1 }); // shifted in, slot unchanged
+  });
+
   it("shows trade sizes in quote currency when asked", () => {
     const [slot] = deriveTrades([trade("2500.0", "2", "B")], 0, EMPTY_TRADES, { szDecimals: 4, quote: true });
     expect(slot.sz).toBe("5,000");
