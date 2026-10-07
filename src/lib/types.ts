@@ -50,6 +50,8 @@ export interface Slot {
 export interface Grouping {
   value: NSigFigs;
   label: string;
+  /** The bare price step, e.g. "1" for "1 (full precision)". */
+  step: string;
 }
 
 export interface TradeSlot {

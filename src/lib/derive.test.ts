@@ -74,10 +74,10 @@ describe("deriveBook", () => {
   it("labels precision options by price step, cut off at full precision, and reuses the array when unchanged", () => {
     const btc = derive(snap([["83452.0", "1"]], [["83453.0", "1"]]));
     expect(btc.book.groupings).toEqual([
-      { value: 2, label: "1,000" },
-      { value: 3, label: "100" },
-      { value: 4, label: "10" },
-      { value: null, label: "1 (full precision)" },
+      { value: 2, label: "1,000", step: "1,000" },
+      { value: 3, label: "100", step: "100" },
+      { value: 4, label: "10", step: "10" },
+      { value: null, label: "1 (full precision)", step: "1" },
     ]);
     const again = derive(snap([["83450.0", "1"]], [["83451.0", "1"]]), btc);
     expect(again.book.groupings).toBe(btc.book.groupings);

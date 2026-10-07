@@ -74,9 +74,10 @@ function groupingsAt(price: number, szDecimals: number, prev: Grouping[] | undef
   const next: Grouping[] = [];
   for (const n of [2, 3, 4, 5] as const) {
     const tick = tickOf(price, n, szDecimals);
-    if (tick > full) next.push({ value: n, label: fmtTick(tick) });
+    if (tick > full) next.push({ value: n, label: fmtTick(tick), step: fmtTick(tick) });
   }
-  next.push({ value: null, label: `${fmtTick(full)} (full precision)` });
+  const step = fmtTick(full);
+  next.push({ value: null, label: `${step} (full precision)`, step });
   const same = prev?.length === next.length && next.every((g, i) => g.label === prev[i].label);
   return same ? prev : next;
 }

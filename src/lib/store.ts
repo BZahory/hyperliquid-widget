@@ -163,9 +163,10 @@ export function boot() {
   start();
 }
 
-/** Clear the book for a switch but keep the precision menu populated until the first snapshot relabels it. */
-function clearBook(): DisplayBook {
-  return { ...EMPTY_BOOK, groupings: store.getState().book.groupings };
+/** Clear the book for a switch but keep the precision menu populated until the first snapshot relabels it.
+ *  A precision switch already knows its step, so only cold start and coin switches show "—". */
+function clearBook(tick = ""): DisplayBook {
+  return { ...EMPTY_BOOK, tick, groupings: store.getState().book.groupings };
 }
 
 export function setCoin(coin: Coin) {
@@ -177,7 +178,8 @@ export function setCoin(coin: Coin) {
 
 export function setPrecision(nSigFigs: NSigFigs) {
   if (nSigFigs === store.getState().nSigFigs) return;
-  store.setState({ nSigFigs, loading: true, book: clearBook() });
+  const tick = store.getState().book.groupings.find((g) => g.value === nSigFigs)?.step ?? "";
+  store.setState({ nSigFigs, loading: true, book: clearBook(tick) });
   resubscribeBook();
 }
 
