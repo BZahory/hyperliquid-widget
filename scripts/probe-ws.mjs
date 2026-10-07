@@ -1,5 +1,5 @@
 // Reproduces the live-feed findings the app relies on (see README): normalised ACKs, full snapshots,
-// the two cadences, pre-ACK stragglers. Run: node scripts/probe-ws.mjs (Node ≥ 22).
+// the fast cadence (5 levels, ~550ms), pre-ACK stragglers. Run: node scripts/probe-ws.mjs (Node ≥ 22).
 const t0 = Date.now();
 const log = (...a) => console.log(`[+${String(Date.now() - t0).padStart(5)}ms]`, ...a);
 const ws = new WebSocket("wss://api.hyperliquid.xyz/ws");

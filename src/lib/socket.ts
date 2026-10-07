@@ -9,8 +9,8 @@ export type Sub =
       type: "l2Book";
       coin: string;
       nSigFigs: NSigFigs;
-      /** Verified live: `fast: true` pushes the top 5 levels ~2×/s; the default pushes 20 levels
-       *  every ~5s. The store merges both. */
+      /** Documented: `fast: true` sends the top 5 levels (~2×/s measured) instead of 20 (every
+       *  ~5s). The store merges both. */
       fast: boolean;
     }
   | { type: "trades"; coin: string };

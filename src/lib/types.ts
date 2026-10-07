@@ -1,4 +1,5 @@
-/** Wire shapes as Hyperliquid sends them: every numeric is a string, parsed once in derive.ts. */
+/** Wire shapes as Hyperliquid sends them: prices and sizes are strings (`n`, `time` are numbers),
+ *  parsed in derive.ts. */
 export interface WireLevel {
   px: string;
   sz: string;

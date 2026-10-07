@@ -45,25 +45,28 @@ Where the perf-sensitive choices live:
 | --- | --- |
 | React renders at most once per frame regardless of message rate | `store.ts` — `schedule()` / `flush()`: one rAF, latest snapshot wins |
 | All parsing/formatting happens once, outside components | `derive.ts`; components receive strings and 0..1 ratios (`types.ts`) |
-| Unchanged rows bail out | `Row.tsx` — `memo` with primitive props; `verify.mjs` counts Row fibers that rendered vs. whose props changed via the React DevTools commit hook |
+| Zero wasted renders | ≤ 1 commit per frame (~1.85/s, one per fast snapshot); header, controls and menus don't re-render in steady state. `Row.tsx` — `memo` with primitive props, so a row renders only when its props change (most do each tick: totals and the shared max move); `verify.mjs` counts Row fibers that rendered vs. whose props changed via the React DevTools commit hook |
 | Depth bars never trigger layout | `globals.css` `.bar` — `transform: scaleX()` with a 120 ms linear transition |
 | Zero layout shift | fixed 32 px rows (22 px below 900 px viewport height), fixed grid columns, `font-variant-numeric: tabular-nums` (checked in `verify.mjs`) |
 | Flashes restart without remounting | `Row.tsx` alternates `flash-up-a` / `flash-up-b` by `flashSeq` parity; state persists on the slot until the next change there |
 | Exactly one `useEffect` | `OrderBook.tsx` — boots the idempotent data layer; symbol/precision/unit changes are plain actions |
 
-## What the API actually does (verified with `scripts/probe-ws.mjs`)
+## What the API actually does (measured on mainnet)
+
+`scripts/probe-ws.mjs` re-checks the snapshot shape, ACKs, fast cadence and stragglers.
 
 - Each `l2Book` message is a full snapshot: `{coin, time, levels: [bids desc, asks asc]}`, `px`/`sz`
   strings, `n` number. State is replaced wholesale every frame; there is no diff engine.
 - `subscriptionResponse` echoes a *normalised* subscription (adds `mantissa: null`, `fast: false`),
   so ACKs are matched on our own fields, never deep-equal. A duplicate subscribe returns an
   `error` channel message.
-- **Two cadences.** The default subscription sends 20 levels per side but only every ~5 s. Adding
-  `fast: true` (accepted and echoed by the server) sends ~2 snapshots per second but only the top
-  5 levels per side. The widget subscribes to both and merges them: the fast top-5 verbatim, then
-  the levels strictly beyond them from the previous merge (reset to the deep snapshot whenever one
-  lands), so a level leaving the fast window keeps its last fast size instead of reverting. The top of the book is always fresh; deeper rows
-  refresh every few seconds. The deep ladder spans only ~$19 on BTC, so a bigger move empties the
+- **Two cadences.** The default subscription sends 20 levels per side but only every ~5 s. The
+  [documented](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions)
+  `fast: true` option sends ~2 snapshots per second but only the top 5 levels per side. The
+  widget subscribes to both and merges them: the fast top-5 verbatim, then the levels strictly
+  beyond them from the previous merge (reset to the deep snapshot whenever one lands), so a level
+  leaving the fast window keeps its last fast size instead of reverting. The top of the book is
+  always fresh; deeper rows refresh every few seconds. The deep ladder spans only ~$19 on BTC, so a bigger move empties the
   tail of one side; the store then refetches 20 levels over HTTP (`POST /info` `l2Book`, ~200 ms,
   one in flight, ~1/s) and shows skeletons meanwhile: a short side lasts one round trip, or ~1 s
   under the throttle; a failed request falls back to the next deep snapshot (≤ ~5 s).
@@ -71,7 +74,9 @@ Where the perf-sensitive choices live:
   coin, snapshots at the old grouping can still arrive. Flipping precision every 900 ms for 10
   rounds showed they arrive only *before* the new subscription's ACK, never after. Each registry
   entry therefore drops data until its ACK (with a 2 s fail-open so a lost ACK can't freeze the
-  book). Switching coins needs no gate: routing is by coin, so late messages find no entry.
+  book). Switching coins needs no gate: routing is by coin, so late messages find no entry. Known
+  gap: re-selecting a grouping whose earlier ACK is still in flight (three switches inside one
+  round trip) lets that ACK open the gate early, so a frame or two of the middle grouping can show.
 - The `trades` subscription sends a batch of the 30 most recent fills on subscribe (oldest →
   newest), then small incremental batches. Fields: `coin, side ("B" buy / "A" sell), px, sz, time,
   hash, tid, users`. The widget keeps the newest 25, flashing only fresh fills.
@@ -102,8 +107,8 @@ grouping and unit controls above the book) and then adds what a trader actually 
 - **Sweep highlight** on hover: every level between the touch and the cursor lights up, i.e. what a
   market order of that depth would eat. Pure CSS (`:hover ~` for asks, `:has(~ :hover)` for bids).
 - **Grouping as price steps.** The control above the book shows the current step (e.g. `10`) and the dropdown lists
-  the `nSigFigs` options by the step each produces at the current price — `1,000 · 100 · 10 ·
-  1 (full precision)` for BTC, `100 · 10 · 1 · 0.1 (full precision)` for ETH — derived from
+  the `nSigFigs` options by the step each produces at the current price — at current prices
+  `1,000 · 100 · 10 · 1 (full precision)` for BTC, `100 · 10 · 1 · 0.1 (full precision)` for ETH — derived from
   Hyperliquid's tick rules (≤5 significant figures, ≤ 6 − szDecimals decimals, integers always
   allowed). Options that would not be coarser than full precision are left out. Sizes can be
   shown in USD or the base asset.
