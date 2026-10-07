@@ -44,7 +44,7 @@ export function Book() {
         {book.bids.map((slot, i) => row("bid", slot, i))}
       </div>
       {/* Imbalance: share of displayed depth on each side. */}
-      <div className="flex items-center gap-3 px-4 pb-3 pt-3 text-xs" aria-label="Depth imbalance">
+      <div className="flex items-center gap-3 px-4 py-2 text-xs" aria-label="Depth imbalance">
         <span className="w-9 text-bid">{book.bidPct}</span>
         <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-ask/35">
           <div

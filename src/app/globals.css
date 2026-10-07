@@ -37,7 +37,7 @@
     display: grid;
     grid-template-columns: 1.15fr 1fr 1fr;
     align-items: center;
-    height: 28px;
+    height: 24px;
     padding: 0 16px;
     font-size: 13px;
     line-height: 1;
@@ -56,7 +56,7 @@
   }
   .row > .sz {
     height: auto;
-    padding: 3px 6px;
+    padding: 2px 6px;
     margin-left: -6px;
     border-radius: 3px;
   }

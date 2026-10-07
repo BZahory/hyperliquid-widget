@@ -42,7 +42,7 @@ Where the perf-sensitive choices live:
 | All parsing/formatting happens once, outside components | `derive.ts`; components receive strings and 0..1 ratios (`types.ts`) |
 | Unchanged rows bail out | `Row.tsx` — `memo` with primitive props; `verify.mjs` counts Row fibers that rendered vs. whose props changed via the React DevTools commit hook |
 | Depth bars never trigger layout | `globals.css` `.bar` — `transform: scaleX()` with a 120 ms linear transition |
-| Zero layout shift | fixed 28 px rows, fixed grid columns, `font-variant-numeric: tabular-nums` (checked in `verify.mjs`) |
+| Zero layout shift | fixed 24 px rows, fixed grid columns, `font-variant-numeric: tabular-nums` (checked in `verify.mjs`) |
 | Flashes restart without remounting | `Row.tsx` alternates `flash-up-a` / `flash-up-b` by `flashSeq` parity; state persists on the slot until the next change there |
 | Exactly one `useEffect` | `OrderBook.tsx` — boots the idempotent data layer; symbol/precision/unit changes are plain actions |
 

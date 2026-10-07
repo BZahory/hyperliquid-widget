@@ -37,7 +37,7 @@ export function OrderBook() {
     <div className="flex w-full max-w-[440px] flex-col gap-4">
       <Header />
       <section className="card pb-1">
-        <div className="flex items-end border-b border-line px-4 pt-3">
+        <div className="flex items-end border-b border-line px-4 pt-2.5">
           <h2 className="border-b-2 border-accent pb-2 text-[15px] font-medium leading-none">Order Book</h2>
         </div>
         <ColumnHeaders />
@@ -52,7 +52,7 @@ function Header() {
   const coin = useStore(store, (s) => s.coin);
   const status = useStore(store, (s) => s.status);
   return (
-    <header className="card flex items-center gap-3 px-4 py-3">
+    <header className="card flex items-center gap-3 px-4 py-2">
       <span
         aria-hidden="true"
         className={`flex size-10 items-center justify-center rounded-full text-lg font-bold text-[#0f1113] ${
@@ -101,7 +101,7 @@ function ColumnHeaders() {
   const quote = useStore(store, (s) => s.quote);
   const unit = quote ? "USD" : coin;
   return (
-    <div className="row !h-9 text-xs text-muted">
+    <div className="row !h-7 text-xs text-muted">
       <span>Price</span>
       <span>Size ({unit})</span>
       <span className="total">Total ({unit})</span>
@@ -115,7 +115,7 @@ function Footer() {
   const quote = useStore(store, (s) => s.quote);
   const tick = useStore(store, (s) => s.book.tick);
   return (
-    <div className="flex items-center justify-between border-t border-line px-4 py-2.5 text-sm">
+    <div className="flex items-center justify-between border-t border-line px-4 py-2 text-sm">
       <Select
         label="Price grouping"
         value={nSigFigs}
