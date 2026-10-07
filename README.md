@@ -147,4 +147,3 @@ synchronously and shows the new book; menus close on outside click; keyboard sel
   listings (hyna, cash, flx) are delisted, so the market menu lists the two main-dex markets.
 - Test the socket manager against a scripted mock server (reconnect, ACK gate, watchdog); today
   those paths are exercised only by the Playwright offline/online cycle.
-- `prefers-reduced-motion` to disable flashes and bar glides.

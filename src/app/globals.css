@@ -160,3 +160,12 @@
 @keyframes pulse-dot {
   50% { opacity: 0.35; }
 }
+
+/* Flashes, bar glides, shimmer and the status pulse are all decoration. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
