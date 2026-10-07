@@ -63,8 +63,10 @@ Where the perf-sensitive choices live:
   5 levels per side. The widget subscribes to both and merges them: the fast top-5 verbatim, then
   the levels strictly beyond them from the previous merge (reset to the deep snapshot whenever one
   lands), so a level leaving the fast window keeps its last fast size instead of reverting. The top of the book is always fresh; deeper rows
-  refresh every few seconds. After a sharp move the deep tail can briefly show a price gap until
-  the next deep snapshot fills it in.
+  refresh every few seconds. The deep ladder spans only ~$19 on BTC, so a bigger move empties the
+  tail of one side; the store then refetches 20 levels over HTTP (`POST /info` `l2Book`, ~200 ms,
+  one in flight, ~1/s) and shows skeletons meanwhile: a short side lasts one round trip, or ~1 s
+  under the throttle; a failed request falls back to the next deep snapshot (≤ ~5 s).
 - **Stragglers.** `l2Book` messages do not echo `nSigFigs`; after a precision change on the same
   coin, snapshots at the old grouping can still arrive. Flipping precision every 900 ms for 10
   rounds showed they arrive only *before* the new subscription's ACK, never after. Each registry
@@ -134,8 +136,7 @@ synchronously and shows the new book; menus close on outside click; keyboard sel
 
 ## Next steps
 
-- Mark deep rows that are older than the fast top-5 (a subtle text dim) and fill the gap after a
-  sharp move from the `bbo` or `trades` channel instead of waiting for the next deep snapshot.
+- Mark deep rows that are older than the fast top-5 (a subtle text dim).
 - Fetch `szDecimals` and max leverage from the `meta` endpoint to support any coin instead of a
   two-entry table. On mainnet today BTC and ETH perps exist only on the main dex; the HIP-3 dex
   listings (hyna, cash, flx) are delisted, so the market menu lists the two main-dex markets.

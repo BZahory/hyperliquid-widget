@@ -5,9 +5,8 @@ import { store } from "@/lib/store";
 import { Row, type RowKind } from "./Row";
 import type { Slot } from "@/lib/types";
 
-function kindOf(slot: Slot, loading: boolean): RowKind {
-  return slot.px ? "level" : loading ? "skeleton" : "empty";
-}
+/** BTC/ETH books are never thinner than DEPTH, so a missing level is always data still on its way. */
+const kindOf = (slot: Slot): RowKind => (slot.px ? "level" : "skeleton");
 
 /** The live part: re-renders once per committed frame; unchanged rows bail out via memo. */
 export function Book() {
@@ -18,7 +17,7 @@ export function Book() {
     <Row
       key={i}
       side={side}
-      kind={kindOf(slot, loading)}
+      kind={kindOf(slot)}
       px={slot.px}
       sz={slot.sz}
       total={slot.total}

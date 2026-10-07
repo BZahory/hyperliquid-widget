@@ -1,5 +1,5 @@
 import { createStore } from "zustand/vanilla";
-import { deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, mergeSnapshots, prependTrades, type Derived } from "./derive";
+import { DEPTH, deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, mergeSnapshots, prependTrades, type Derived } from "./derive";
 import { onStatus, start, subscribe, type Status } from "./socket";
 import type { Coin, DisplayBook, NSigFigs, TradeSlot, WireL2Book, WireTrade } from "./types";
 
@@ -50,6 +50,32 @@ let tradesDirty = false;
 let raf = 0;
 let stopBook: (() => void) | null = null;
 let stopTrades: (() => void) | null = null;
+/** Infinity while a refill is in flight, else when the last one ended. */
+let refillAt = 0;
+
+/** The deep ladder spans only ~$19 on BTC, so after a bigger move a side runs short until the next
+ *  deep snapshot (~5s). Fetch a fresh 20-level book over HTTP instead: at most one in flight, ~1/s. */
+function refill() {
+  if (Date.now() - refillAt < 1000) return;
+  refillAt = Infinity;
+  const { coin, nSigFigs } = store.getState();
+  fetch("https://api.hyperliquid.xyz/info", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "l2Book", coin, ...(nSigFigs !== null && { nSigFigs }) }),
+  })
+    .then((res) => res.json())
+    .then((book: WireL2Book) => {
+      const s = store.getState();
+      if (s.coin !== coin || s.nSigFigs !== nSigFigs || s.status !== "live") return;
+      deep = book;
+      merged = null;
+      bookDirty = true;
+      schedule();
+    })
+    .catch(() => {}) // the next deep snapshot fills the gap anyway
+    .finally(() => (refillAt = Date.now()));
+}
 
 function commit() {
   const { coin, nSigFigs, quote, trades } = store.getState();
@@ -57,6 +83,7 @@ function commit() {
   const patch: Partial<BookState> = {};
   const snap = bookDirty ? (merged = mergeSnapshots(fast, merged ?? deep)) : null;
   if (snap) {
+    if (snap.levels[0].length < DEPTH || snap.levels[1].length < DEPTH) refill();
     const fastLen: [number, number] | undefined = fast ? [fast.levels[0].length, fast.levels[1].length] : undefined;
     derived = deriveBook(snap, derived, { szDecimals, nSigFigs, quote }, fastLen);
     patch.book = derived.book;
