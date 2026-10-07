@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DEPTH, deriveBook, EMPTY_BOOK, mergeSnapshots, type Derived, type DeriveOptions } from "./derive";
-import type { WireL2Book, WireLevel } from "./types";
+import { DEPTH, deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, mergeSnapshots, prependTrades, TRADES, type Derived, type DeriveOptions } from "./derive";
+import type { WireL2Book, WireLevel, WireTrade } from "./types";
 
 const level = (px: string, sz: string): WireLevel => ({ px, sz, n: 1 });
 const snap = (bids: [string, string][], asks: [string, string][]): WireL2Book => ({
@@ -27,9 +27,6 @@ describe("deriveBook", () => {
     expect(book.asks.slice(0, 2).map((s) => s.total)).toEqual(["1.00000", "2.00000"]);
     expect(book.bids.slice(0, 3).map((s) => s.ratio)).toEqual([1 / 6, 3 / 6, 1]);
     expect(book.asks.slice(0, 2).map((s) => s.ratio)).toEqual([1 / 6, 2 / 6]);
-    expect(book.bidShare).toBe(0.75);
-    expect(book.bidPct).toBe("75%");
-    expect(book.askPct).toBe("25%");
   });
 
   it("only uses the displayed depth for cumulative totals", () => {
@@ -99,7 +96,6 @@ describe("deriveBook", () => {
     const { book } = derive(snap([], [["101.0", "1"]]));
     expect(book.spread).toBe("");
     expect(book.spreadPct).toBe("");
-    expect(book.bidShare).toBe(0);
   });
 
   it("does not flash on the first snapshot", () => {
@@ -163,7 +159,6 @@ describe("deriveBook", () => {
     expect(book.asks[0].total).toBe("5,200");
     expect(book.bids[2].ratio).toBe(1);
     expect(book.asks[0].ratio).toBeCloseTo(5200 / 7200);
-    expect(book.bidShare).toBeCloseTo(7200 / 12400);
   });
 
   it("does not flash when a previously empty side gains levels", () => {
@@ -202,5 +197,35 @@ describe("mergeSnapshots", () => {
   it("falls back to the whole deep side when the fast side is empty", () => {
     const merged = mergeSnapshots(snap([], [["100.1", "1"]]), deep)!;
     expect(merged.levels[0]).toHaveLength(5);
+  });
+});
+
+describe("trades", () => {
+  const trade = (px: string, sz: string, side: "A" | "B", time = 1_791_400_000_000): WireTrade => ({ coin: "BTC", side, px, sz, time, tid: time });
+
+  it("prepends a wire batch newest-first and caps the list at the visible rows", () => {
+    const recent = prependTrades([trade("1.0", "1", "B", 1)], [trade("2.0", "1", "A", 2), trade("3.0", "1", "B", 3)]);
+    expect(recent.map((t) => t.px)).toEqual(["3.0", "2.0", "1.0"]);
+    const many = Array.from({ length: TRADES + 5 }, (_, i) => trade(`${i}.0`, "1", "B", i));
+    expect(prependTrades([], many)).toHaveLength(TRADES);
+  });
+
+  it("formats trades, pads to TRADES slots, and flashes only the fresh leading slots", () => {
+    const recent = [trade("83452.0", "0.5", "B"), trade("83451.0", "0.25", "A")];
+    const first = deriveTrades(recent, 0, EMPTY_TRADES, { szDecimals: 5, quote: false });
+    expect(first).toHaveLength(TRADES);
+    expect(first[0]).toMatchObject({ px: "83,452", sz: "0.50000", side: "buy", flashSeq: 0 });
+    expect(first[0].time).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+    expect(first[1]).toMatchObject({ px: "83,451", sz: "0.25000", side: "sell", flashSeq: 0 });
+    expect(first[2]).toMatchObject({ px: "", side: "" });
+
+    const next = deriveTrades([trade("83453.0", "1", "B"), ...recent], 1, first, { szDecimals: 5, quote: false });
+    expect(next[0]).toMatchObject({ px: "83,453", flashSeq: 1 });
+    expect(next[1]).toMatchObject({ px: "83,452", flashSeq: 0 }); // shifted, not fresh
+  });
+
+  it("shows trade sizes in quote currency when asked", () => {
+    const [slot] = deriveTrades([trade("2500.0", "2", "B")], 0, EMPTY_TRADES, { szDecimals: 4, quote: true });
+    expect(slot.sz).toBe("5,000");
   });
 });

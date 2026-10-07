@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type KeyboardEvent, type FocusEvent } from "react";
+import { useId, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from "react";
 
 export interface Option<T> {
   value: T;
@@ -14,8 +14,11 @@ interface SelectProps<T> {
   onChange: (value: T) => void;
   /** Visible text for the closed control instead of the selected label (which stays available to AT). */
   display?: string;
-  /** Which way the list opens. */
+  /** Icon-only trigger (e.g. a menu glyph); the selected label stays available to AT. */
+  icon?: ReactNode;
+  /** Which way the list opens and which edge it hugs. */
   direction?: "down" | "up";
+  align?: "left" | "right";
   className?: string;
 }
 
@@ -30,7 +33,9 @@ export function Select<T extends string | number | null>({
   options,
   onChange,
   display,
+  icon,
   direction = "down",
+  align = "left",
   className = "",
 }: SelectProps<T>) {
   const id = useId();
@@ -94,28 +99,32 @@ export function Select<T extends string | number | null>({
         aria-activedescendant={open ? `${id}-${active}` : undefined}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={onKeyDown}
-        className="flex cursor-pointer items-center gap-1.5 rounded-md outline-none hover:text-white focus-visible:ring-2 focus-visible:ring-accent/70"
+        className={`flex cursor-pointer items-center gap-1.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
+          icon ? "p-1.5 text-muted hover:bg-white/6 hover:text-ink" : "hover:text-white"
+        }`}
       >
-        <span>{display ?? options[selected]?.label}</span>
-        {display !== undefined && <span className="sr-only">{options[selected]?.label}</span>}
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          aria-hidden="true"
-          className={`shrink-0 text-muted transition-transform ${(direction === "up") !== open ? "rotate-180" : ""}`}
-        >
-          <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
+        {icon ?? <span>{display ?? options[selected]?.label}</span>}
+        {(icon || display !== undefined) && <span className="sr-only">{options[selected]?.label}</span>}
+        {!icon && (
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            aria-hidden="true"
+            className={`shrink-0 text-muted transition-transform ${(direction === "up") !== open ? "rotate-180" : ""}`}
+          >
+            <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        )}
       </button>
       {open && (
         <ul
           role="listbox"
           id={id}
           aria-label={label}
-          className={`absolute left-0 z-10 min-w-full overflow-hidden rounded-lg border border-line bg-[#17191c] py-1 text-sm shadow-xl ${
+          className={`absolute z-10 min-w-full overflow-hidden rounded-lg border border-line bg-[#17191c] py-1 text-sm shadow-xl ${
             direction === "up" ? "bottom-full mb-2" : "top-full mt-2"
-          }`}
+          } ${align === "right" ? "right-0" : "left-0"}`}
         >
           {options.map((o, i) => (
             <li

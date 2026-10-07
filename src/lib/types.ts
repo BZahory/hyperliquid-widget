@@ -17,6 +17,17 @@ export interface WireL2Book {
   fast?: boolean;
 }
 
+/** One fill from the `trades` channel. Batches arrive oldest → newest. */
+export interface WireTrade {
+  coin: string;
+  /** "B" = buyer was the taker, "A" = seller was. */
+  side: "A" | "B";
+  px: string;
+  sz: string;
+  time: number;
+  tid: number;
+}
+
 export type Coin = "BTC" | "ETH";
 /** `nSigFigs` of the l2Book subscription; null = full precision. */
 export type NSigFigs = null | 5 | 4 | 3 | 2;
@@ -44,6 +55,15 @@ export interface Grouping {
   label: string;
 }
 
+export interface TradeSlot {
+  px: string;
+  sz: string;
+  time: string;
+  side: "buy" | "sell" | "";
+  /** Increments when a fresh trade lands in this slot, so only new fills animate, not shifted ones. */
+  flashSeq: number;
+}
+
 export interface DisplayBook {
   /** Exactly DEPTH slots each, index 0 = best price. Short sides are padded with empty slots. */
   asks: Slot[];
@@ -54,8 +74,4 @@ export interface DisplayBook {
   tick: string;
   /** Coarse → fine, ending with full precision; options no coarser than full precision are left out. */
   groupings: Grouping[];
-  /** Share of displayed depth sitting on the bid side, 0..1. */
-  bidShare: number;
-  bidPct: string;
-  askPct: string;
 }

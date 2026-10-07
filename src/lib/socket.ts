@@ -1,22 +1,25 @@
-import type { NSigFigs, WireL2Book } from "./types";
+import type { NSigFigs, WireL2Book, WireTrade } from "./types";
 
 /**
  * Module-level WebSocket manager. Owns the single mainnet socket, a subscription registry
- * keyed by (coin, nSigFigs, fast), reconnect with exponential backoff + jitter, resubscribe on
- * every open, a ping that doubles as a liveness watchdog, and offline/online/visibility
+ * keyed by the subscription's identity, reconnect with exponential backoff + jitter, resubscribe
+ * on every open, a ping that doubles as a liveness watchdog, and offline/online/visibility
  * listeners so the status indicator can never say "live" over a dead connection.
  */
 export type Status = "connecting" | "live" | "reconnecting" | "offline";
 
-export interface L2BookSub {
-  coin: string;
-  nSigFigs: NSigFigs;
-  /**
-   * The feed has two cadences (verified live): `fast: true` pushes the top 5 levels per side
-   * ~2×/s; the default pushes 20 levels per side but only every ~5s. The store merges both.
-   */
-  fast: boolean;
-}
+export type Sub =
+  | {
+      type: "l2Book";
+      coin: string;
+      nSigFigs: NSigFigs;
+      /**
+       * The feed has two cadences (verified live): `fast: true` pushes the top 5 levels per side
+       * ~2×/s; the default pushes 20 levels per side but only every ~5s. The store merges both.
+       */
+      fast: boolean;
+    }
+  | { type: "trades"; coin: string };
 
 const WS_URL = "wss://api.hyperliquid.xyz/ws";
 /** Server drops idle connections after 60s (measured); ping well inside that. */
@@ -30,8 +33,8 @@ const MAX_BACKOFF_MS = 30_000;
 const ACK_TIMEOUT_MS = 2_000;
 
 interface Entry {
-  sub: L2BookSub;
-  onData: (data: WireL2Book) => void;
+  sub: Sub;
+  onData: (data: never) => void;
   /**
    * l2Book messages do not echo nSigFigs, so after a precision change on the same coin a
    * straggler at the old grouping can arrive. Verified live: stragglers only ever arrive
@@ -54,7 +57,8 @@ let connectTimer: ReturnType<typeof setTimeout> | undefined;
 let pingTimer: ReturnType<typeof setInterval> | undefined;
 let started = false;
 
-const keyOf = (sub: L2BookSub) => `${sub.coin}:${sub.nSigFigs ?? "full"}:${sub.fast ? "fast" : "deep"}`;
+const keyOf = (sub: Sub) =>
+  sub.type === "trades" ? `trades:${sub.coin}` : `l2Book:${sub.coin}:${sub.nSigFigs ?? "full"}:${sub.fast ? "fast" : "deep"}`;
 
 function setStatus(next: Status) {
   if (next === status) return;
@@ -67,12 +71,14 @@ export function onStatus(listener: (s: Status) => void) {
   listener(status);
 }
 
-function send(method: "subscribe" | "unsubscribe", sub: L2BookSub) {
+function send(method: "subscribe" | "unsubscribe", sub: Sub) {
   if (ws?.readyState !== WebSocket.OPEN) return; // onopen resubscribes everything in the registry
-  // Unsubscribe must mirror this exact payload, so build it in one place.
-  const subscription: Record<string, unknown> = { type: "l2Book", coin: sub.coin };
-  if (sub.nSigFigs !== null) subscription.nSigFigs = sub.nSigFigs;
-  if (sub.fast) subscription.fast = true;
+  // Unsubscribe must mirror the exact subscribe payload, so build it in one place.
+  const subscription: Record<string, unknown> = { type: sub.type, coin: sub.coin };
+  if (sub.type === "l2Book") {
+    if (sub.nSigFigs !== null) subscription.nSigFigs = sub.nSigFigs;
+    if (sub.fast) subscription.fast = true;
+  }
   ws.send(JSON.stringify({ method, subscription }));
 }
 
@@ -85,7 +91,9 @@ function armAck(entry: Entry) {
 }
 
 /** Register interest; returns an unsubscribe. Re-subscribing a live key swaps the listener. */
-export function subscribe(sub: L2BookSub, onData: Entry["onData"]): () => void {
+export function subscribe(sub: Extract<Sub, { type: "l2Book" }>, onData: (data: WireL2Book) => void): () => void;
+export function subscribe(sub: Extract<Sub, { type: "trades" }>, onData: (data: WireTrade[]) => void): () => void;
+export function subscribe(sub: Sub, onData: Entry["onData"]): () => void {
   const key = keyOf(sub);
   const existing = registry.get(key);
   if (existing) {
@@ -105,6 +113,18 @@ export function subscribe(sub: L2BookSub, onData: Entry["onData"]): () => void {
   };
 }
 
+/** Hand `data` to every acked entry that matches; a message for a switched-away coin finds none and drops here. */
+function deliver(match: (sub: Sub) => boolean, data: unknown): boolean {
+  let delivered = false;
+  for (const entry of registry.values()) {
+    if (entry.acked && match(entry.sub)) {
+      entry.onData(data as never);
+      delivered = true;
+    }
+  }
+  return delivered;
+}
+
 function onMessage(ev: MessageEvent<string>) {
   const msg = JSON.parse(ev.data);
   // Background tabs throttle timers to once a minute, past the server's idle cutoff; the
@@ -112,15 +132,8 @@ function onMessage(ev: MessageEvent<string>) {
   if (Date.now() - lastPingAt >= PING_MS) ping();
   if (msg.channel === "l2Book") {
     const data = msg.data as WireL2Book;
-    // Route by (coin, cadence): a message for a switched-away coin finds no entry and drops here.
     const fast = data.fast === true;
-    let delivered = false;
-    for (const entry of registry.values()) {
-      if (entry.acked && entry.sub.coin === data.coin && entry.sub.fast === fast) {
-        entry.onData(data);
-        delivered = true;
-      }
-    }
+    const delivered = deliver((s) => s.type === "l2Book" && s.coin === data.coin && s.fast === fast, data);
     // "Live" means snapshots are reaching the book, not merely that the socket opened or that
     // some orphan stream is chatty. Backoff resets here too, so a server that accepts and
     // immediately drops us cannot cause a tight loop.
@@ -129,11 +142,14 @@ function onMessage(ev: MessageEvent<string>) {
       attempt = 0;
       setStatus("live");
     }
+  } else if (msg.channel === "trades") {
+    const data = msg.data as WireTrade[];
+    if (data.length) deliver((s) => s.type === "trades" && s.coin === data[0].coin, data);
   } else if (msg.channel === "subscriptionResponse" && msg.data.method === "subscribe") {
     // The server normalises the echoed subscription (adds mantissa/fast), so match on our
     // own fields rather than deep-equality.
-    const { coin, nSigFigs, fast } = msg.data.subscription;
-    const entry = registry.get(keyOf({ coin, nSigFigs: nSigFigs ?? null, fast: fast === true }));
+    const echoed = msg.data.subscription;
+    const entry = registry.get(keyOf({ ...echoed, nSigFigs: echoed.nSigFigs ?? null, fast: echoed.fast === true }));
     if (entry) {
       entry.acked = true;
       clearTimeout(entry.ackTimer);

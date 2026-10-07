@@ -164,6 +164,22 @@ await waitForLevels();
 const eth = await prices();
 check("ETH book renders after switch", eth.length >= 20 && Math.max(...eth) < Math.min(...initial) / 5, `ETH ≈ ${eth[0]} vs BTC ≈ ${initial[0]}`);
 
+// 5b. Trades tab: recent fills render with side colouring and clock times, then back to Orders.
+await page.getByRole("tab", { name: "Trades" }).click();
+await page.waitForFunction(() => document.querySelectorAll('[data-testid="trades"] .row[data-kind="level"]').length >= 10, null, {
+  timeout: 20_000,
+});
+const fills = await page.$$eval('[data-testid="trades"] .row[data-kind="level"]', (rows) =>
+  rows.map((r) => ({ side: r.querySelector(".px").className.includes("buy") ? "buy" : r.querySelector(".px").className.includes("sell") ? "sell" : "", time: r.querySelector(".total").textContent })),
+);
+check(
+  "trades tab renders recent fills",
+  fills.length >= 10 && fills.every((f) => f.side && /^\d{2}:\d{2}:\d{2}$/.test(f.time)),
+  `${fills.length} fills, newest ${fills[0]?.time}`,
+);
+await page.getByRole("tab", { name: "Orders" }).click();
+await waitForLevels();
+
 // 6. Keyboard: the dropdowns work without a mouse. End + Enter picks the last option, full precision.
 const grouping = page.getByRole("combobox", { name: "Price grouping" });
 const tickCoarse = Number((await visibleTick()).replace(/,/g, ""));

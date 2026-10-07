@@ -1,7 +1,9 @@
-import type { DisplayBook, Flash, Grouping, NSigFigs, Slot, WireL2Book, WireLevel } from "./types";
+import type { DisplayBook, Flash, Grouping, NSigFigs, Slot, TradeSlot, WireL2Book, WireLevel, WireTrade } from "./types";
 
 /** Rows per side. Fixed so the DOM never changes shape. */
-export const DEPTH = 11;
+export const DEPTH = 12;
+/** Rows in the trades tab: the same height as both sides of the book plus the spread row. */
+export const TRADES = DEPTH * 2 + 1;
 
 export interface DeriveOptions {
   szDecimals: number;
@@ -29,12 +31,13 @@ export const EMPTY_BOOK: DisplayBook = {
   spreadPct: "",
   tick: "",
   groupings: [],
-  bidShare: 0.5,
-  bidPct: "",
-  askPct: "",
 };
 
+const EMPTY_TRADE: TradeSlot = { px: "", sz: "", time: "", side: "", flashSeq: 0 };
+export const EMPTY_TRADES: TradeSlot[] = Array<TradeSlot>(TRADES).fill(EMPTY_TRADE);
+
 const formatters = new Map<number, Intl.NumberFormat>();
+const timeFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 
 function fmt(n: number, decimals: number): string {
   let f = formatters.get(decimals);
@@ -223,9 +226,6 @@ export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveO
       spreadPct = fmt((abs / ref) * 100, 3) + "%";
     }
   }
-  const total = bidDepth + askDepth;
-  const bidShare = total ? bidDepth / total : 0.5;
-
   return {
     book: {
       asks: buildSlots(asks, prev, max, pxDecimals, opts),
@@ -234,11 +234,46 @@ export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveO
       spreadPct,
       tick,
       groupings,
-      bidShare,
-      bidPct: fmt(bidShare * 100, 0) + "%",
-      askPct: fmt((1 - bidShare) * 100, 0) + "%",
     },
     sizes: [bids.sizes, asks.sizes],
     edges: [bids.edge, asks.edge],
   };
+}
+
+/** Newest first, capped at the visible rows. `batch` is a wire message, oldest → newest. */
+export function prependTrades(recent: readonly WireTrade[], batch: readonly WireTrade[]): WireTrade[] {
+  return batch.slice().reverse().concat(recent).slice(0, TRADES);
+}
+
+/**
+ * Display rows for the trades tab. `fresh` is how many leading trades arrived since the previous
+ * frame: only those slots get a new flash, so rows that merely shifted down do not re-animate.
+ */
+export function deriveTrades(
+  recent: readonly WireTrade[],
+  fresh: number,
+  prev: readonly TradeSlot[],
+  opts: Pick<DeriveOptions, "szDecimals" | "quote">,
+): TradeSlot[] {
+  let pxDecimals = 0;
+  for (const t of recent) pxDecimals = Math.max(pxDecimals, fracDigits(t.px));
+  const decimals = opts.quote ? 0 : opts.szDecimals;
+  const slots = new Array<TradeSlot>(TRADES);
+  for (let i = 0; i < TRADES; i++) {
+    const t = recent[i];
+    if (!t) {
+      slots[i] = EMPTY_TRADE;
+      continue;
+    }
+    const px = Number(t.px);
+    const sz = Number(t.sz);
+    slots[i] = {
+      px: fmt(px, pxDecimals),
+      sz: fmt(opts.quote ? sz * px : sz, decimals),
+      time: timeFmt.format(t.time),
+      side: t.side === "B" ? "buy" : "sell",
+      flashSeq: i < fresh ? prev[i].flashSeq + 1 : prev[i].flashSeq,
+    };
+  }
+  return slots;
 }

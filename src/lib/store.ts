@@ -1,47 +1,69 @@
 import { createStore } from "zustand/vanilla";
-import { deriveBook, EMPTY_BOOK, mergeSnapshots, type Derived } from "./derive";
+import { deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, mergeSnapshots, prependTrades, type Derived } from "./derive";
 import { onStatus, start, subscribe, type Status } from "./socket";
-import type { Coin, DisplayBook, NSigFigs, WireL2Book } from "./types";
+import type { Coin, DisplayBook, NSigFigs, TradeSlot, WireL2Book, WireTrade } from "./types";
 
-const COINS: Record<Coin, { szDecimals: number }> = {
-  BTC: { szDecimals: 5 },
-  ETH: { szDecimals: 4 },
+/** Per-market constants from the `meta` endpoint (size decimals and max leverage). */
+export const MARKETS: Record<Coin, { szDecimals: number; maxLeverage: number }> = {
+  BTC: { szDecimals: 5, maxLeverage: 40 },
+  ETH: { szDecimals: 4, maxLeverage: 25 },
 };
+
+export type Tab = "orders" | "trades";
 
 interface BookState {
   coin: Coin;
   nSigFigs: NSigFigs;
   /** Size and total in USD instead of the base asset. */
   quote: boolean;
+  tab: Tab;
   status: Status;
   /** True between a subscription switch and its first snapshot. */
   loading: boolean;
   book: DisplayBook;
+  trades: TradeSlot[];
 }
 
 export const store = createStore<BookState>(() => ({
   coin: "BTC",
   nSigFigs: null,
   quote: false,
+  tab: "orders",
   status: "connecting",
   loading: true,
   book: EMPTY_BOOK,
+  trades: EMPTY_TRADES,
 }));
 
-// ---- Ingestion. One latest-wins slot per feed cadence; a single rAF flushes both at most once
-// per frame, so React can never render more than once per frame regardless of message rate. ----
+// ---- Ingestion. One latest-wins slot per book cadence plus a capped trade list; a single rAF
+// flushes everything at most once per frame, so React never renders more than once per frame. ----
 let fast: WireL2Book | null = null;
 let deep: WireL2Book | null = null;
-let raf = 0;
+let bookDirty = false;
 let derived: Derived | null = null;
-let teardown: (() => void) | null = null;
+let recent: WireTrade[] = [];
+let fresh = 0;
+let tradesDirty = false;
+let raf = 0;
+let stopBook: (() => void) | null = null;
+let stopTrades: (() => void) | null = null;
 
 function commit() {
-  const snap = mergeSnapshots(fast, deep);
-  if (!snap) return;
-  const { coin, nSigFigs, quote } = store.getState();
-  derived = deriveBook(snap, derived, { szDecimals: COINS[coin].szDecimals, nSigFigs, quote });
-  store.setState({ book: derived.book, loading: false });
+  const { coin, nSigFigs, quote, trades } = store.getState();
+  const { szDecimals } = MARKETS[coin];
+  const patch: Partial<BookState> = {};
+  const snap = bookDirty ? mergeSnapshots(fast, deep) : null;
+  if (snap) {
+    derived = deriveBook(snap, derived, { szDecimals, nSigFigs, quote });
+    patch.book = derived.book;
+    patch.loading = false;
+  }
+  if (tradesDirty) {
+    patch.trades = deriveTrades(recent, fresh, trades, { szDecimals, quote });
+    fresh = 0;
+  }
+  bookDirty = tradesDirty = false;
+  if (patch.book || patch.trades) store.setState(patch);
 }
 
 function flush() {
@@ -53,28 +75,40 @@ function schedule() {
   if (!raf) raf = requestAnimationFrame(flush);
 }
 
-/** Forget buffered snapshots and flash history; whatever arrives next renders as a clean baseline. */
-function reset() {
+/** Swap the book subscriptions to the current (coin, nSigFigs); whatever arrives next is a clean baseline. */
+function resubscribeBook() {
+  stopBook?.();
   fast = deep = derived = null;
-}
-
-/** Swap both live subscriptions to the current (coin, nSigFigs) and forget everything from the old ones. */
-function resubscribe() {
-  teardown?.();
-  reset();
+  bookDirty = false;
   const { coin, nSigFigs } = store.getState();
-  const stopFast = subscribe({ coin, nSigFigs, fast: true }, (d) => {
+  const stopFast = subscribe({ type: "l2Book", coin, nSigFigs, fast: true }, (d) => {
     fast = d;
+    bookDirty = true;
     schedule();
   });
-  const stopDeep = subscribe({ coin, nSigFigs, fast: false }, (d) => {
+  const stopDeep = subscribe({ type: "l2Book", coin, nSigFigs, fast: false }, (d) => {
     deep = d;
+    bookDirty = true;
     schedule();
   });
-  teardown = () => {
+  stopBook = () => {
     stopFast();
     stopDeep();
   };
+}
+
+function resubscribeTrades() {
+  stopTrades?.();
+  recent = [];
+  fresh = 0;
+  tradesDirty = false;
+  stopTrades = subscribe({ type: "trades", coin: store.getState().coin }, (batch) => {
+    // The first batch after (re)subscribing is history, not news: render it without flashes.
+    if (recent.length) fresh += batch.length;
+    recent = prependTrades(recent, batch);
+    tradesDirty = true;
+    schedule();
+  });
 }
 
 let booted = false;
@@ -87,10 +121,15 @@ export function boot() {
     // Never merge a snapshot from before a disconnect with one from after it: after sleep the
     // deep buffer could be minutes old while the fast one is fresh. The last book stays on
     // screen (dimmed) until new data replaces it.
-    if (status !== "live") reset();
+    if (status !== "live") {
+      fast = deep = derived = null;
+      recent = [];
+      fresh = 0;
+    }
     store.setState({ status });
   });
-  resubscribe();
+  resubscribeBook();
+  resubscribeTrades();
   start();
 }
 
@@ -101,19 +140,25 @@ function clearBook(): DisplayBook {
 
 export function setCoin(coin: Coin) {
   if (coin === store.getState().coin) return;
-  store.setState({ coin, loading: true, book: clearBook() });
-  resubscribe();
+  store.setState({ coin, loading: true, book: clearBook(), trades: EMPTY_TRADES });
+  resubscribeBook();
+  resubscribeTrades();
 }
 
 export function setPrecision(nSigFigs: NSigFigs) {
   if (nSigFigs === store.getState().nSigFigs) return;
   store.setState({ nSigFigs, loading: true, book: clearBook() });
-  resubscribe();
+  resubscribeBook();
 }
 
-/** Display-only change: re-derive the buffered snapshots on the next frame instead of waiting for data. */
+/** Display-only change: re-derive the buffered data on the next frame instead of waiting for it. */
 export function setQuote(quote: boolean) {
   if (quote === store.getState().quote) return;
   store.setState({ quote });
+  bookDirty = tradesDirty = true;
   schedule();
+}
+
+export function setTab(tab: Tab) {
+  store.setState({ tab });
 }

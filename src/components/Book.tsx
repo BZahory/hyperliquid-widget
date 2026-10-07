@@ -13,7 +13,6 @@ function kindOf(slot: Slot, loading: boolean): RowKind {
 export function Book() {
   const book = useStore(store, (s) => s.book);
   const loading = useStore(store, (s) => s.loading);
-  const stale = useStore(store, (s) => s.status !== "live");
 
   const row = (side: "ask" | "bid", slot: Slot, i: number) => (
     <Row
@@ -30,7 +29,7 @@ export function Book() {
   );
 
   return (
-    <div className={`book${stale ? " stale" : ""}`} data-testid="book" data-loading={loading || undefined}>
+    <div data-testid="book" data-loading={loading || undefined}>
       {/* Asks: worst at the top, best touching the spread. Slot index is the key, never price. */}
       <div className="asks" data-testid="asks">
         {book.asks.map((slot, i) => row("ask", slot, i)).reverse()}
@@ -42,24 +41,6 @@ export function Book() {
       </div>
       <div className="bids" data-testid="bids">
         {book.bids.map((slot, i) => row("bid", slot, i))}
-      </div>
-      <div
-        className="flex items-center gap-3 px-4 py-2 text-xs"
-        role="meter"
-        aria-label="Depth imbalance"
-        aria-valuemin={0}
-        aria-valuemax={1}
-        aria-valuenow={book.bidShare}
-        aria-valuetext={book.bidPct ? `${book.bidPct} bids, ${book.askPct} asks` : "no data"}
-      >
-        <span className="w-9 text-bid">{book.bidPct}</span>
-        <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-ask/35">
-          <div
-            className="absolute inset-0 origin-left bg-bid transition-transform duration-300 ease-out"
-            style={{ transform: `scaleX(${book.bidShare})` }}
-          />
-        </div>
-        <span className="w-9 text-right text-ask">{book.askPct}</span>
       </div>
     </div>
   );
