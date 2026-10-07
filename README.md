@@ -10,10 +10,10 @@ zustand, nothing else at runtime.
 pnpm install && pnpm dev     # http://localhost:3000
 ```
 
-Other commands: `pnpm test` (vitest: derive math, the store merge, socket lifecycle against a fake WebSocket) · `pnpm verify` (Playwright against a running
-dev server, or `URL=https://… pnpm verify` against a deployment; once: `pnpm exec playwright install
-chromium`) · `pnpm probe` (re-check the live API assumptions below) · `pnpm knip` · `pnpm lint` ·
-`pnpm typecheck` · `pnpm build`.
+Other commands: `pnpm test` (vitest: derive math, the store merge, socket lifecycle against a fake
+WebSocket) · `pnpm verify` (Playwright against a running dev server, or `URL=https://… pnpm verify`
+against a deployment; once: `pnpm exec playwright install chromium`) · `pnpm probe` (re-check the
+live API assumptions below) · `pnpm knip` · `pnpm lint` · `pnpm typecheck` · `pnpm build`.
 
 ## Data flow
 
