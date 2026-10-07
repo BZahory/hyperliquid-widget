@@ -82,23 +82,16 @@ function armAck(entry: Entry) {
   }, ACK_TIMEOUT_MS);
 }
 
-/** Register interest; returns an unsubscribe. Re-subscribing a live key swaps the listener. */
+/** Register interest; returns an unsubscribe. Callers stop a key before subscribing it again. */
 export function subscribe(sub: Extract<Sub, { type: "l2Book" }>, onData: (data: WireL2Book) => void): () => void;
 export function subscribe(sub: Extract<Sub, { type: "trades" }>, onData: (data: WireTrade[]) => void): () => void;
 export function subscribe(sub: Sub, onData: Entry["onData"]): () => void {
   const key = keyOf(sub);
-  const existing = registry.get(key);
-  if (existing) {
-    existing.onData = onData;
-  } else {
-    const entry: Entry = { sub, onData, acked: false, ackTimer: undefined };
-    registry.set(key, entry);
-    send("subscribe", sub);
-    armAck(entry);
-  }
+  const entry: Entry = { sub, onData, acked: false, ackTimer: undefined };
+  registry.set(key, entry);
+  send("subscribe", sub);
+  armAck(entry);
   return () => {
-    const entry = registry.get(key);
-    if (entry?.onData !== onData) return; // already swapped or removed
     registry.delete(key);
     clearTimeout(entry.ackTimer);
     send("unsubscribe", sub);
