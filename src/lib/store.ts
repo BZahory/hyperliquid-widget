@@ -1,7 +1,7 @@
 import { createStore } from "zustand/vanilla";
 import { DEPTH, deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, mergeSnapshots, prependTrades, type Derived } from "./derive";
 import { onStatus, start, subscribe, type Status } from "./socket";
-import type { Coin, DisplayBook, NSigFigs, TradeSlot, WireL2Book, WireTrade } from "./types";
+import type { Coin, DisplayBook, Flash, NSigFigs, TradeSlot, WireL2Book, WireTrade } from "./types";
 
 /** Per-market constants from the `meta` endpoint (size decimals and max leverage). */
 export const MARKETS: Record<Coin, { szDecimals: number; maxLeverage: number }> = {
@@ -191,6 +191,13 @@ export function setQuote(quote: boolean) {
   schedule();
 }
 
+const quiet = <T extends { flash: Flash; flashSeq: number }>(s: T): T => (s.flashSeq ? { ...s, flash: "", flashSeq: 0 } : s);
+
+/** Switching tabs remounts the panel's rows, which would replay every slot's last flash: clear them. */
 export function setTab(tab: Tab) {
-  store.setState({ tab });
+  const { tab: current, book, trades } = store.getState();
+  if (tab === current) return;
+  const quietBook = { ...book, asks: book.asks.map(quiet), bids: book.bids.map(quiet) };
+  if (derived) derived = { ...derived, book: quietBook };
+  store.setState({ tab, book: quietBook, trades: trades.map(quiet) });
 }
