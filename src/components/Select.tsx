@@ -16,7 +16,6 @@ interface SelectProps<T> {
   display?: string;
   /** Icon-only trigger; the selected label stays exposed to AT. */
   icon?: ReactNode;
-  /** Which way the list opens and which edge it hugs. */
   direction?: "down" | "up";
   align?: "left" | "right";
   className?: string;
