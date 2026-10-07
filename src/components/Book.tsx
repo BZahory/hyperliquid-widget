@@ -35,8 +35,8 @@ export function Book() {
       </div>
       <div className="row bg-[#2a2d31] text-muted" data-testid="spread">
         <span className="px">Spread</span>
-        <span className="sz">{book.spread}</span>
-        <span className="total">{book.spreadPct}</span>
+        <span className="sz text-ink">{book.spread}</span>
+        <span className="total text-ink">{book.spreadPct}</span>
       </div>
       <div className="bids" data-testid="bids">
         {book.bids.map((slot, i) => row("bid", slot, i))}
