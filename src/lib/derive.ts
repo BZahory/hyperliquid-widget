@@ -185,6 +185,7 @@ export function mergeSnapshots(fast: WireL2Book | null, deep: WireL2Book | null)
     coin: fast.coin,
     time: fast.time,
     levels: [tail(fast.levels[0], deep.levels[0], true), tail(fast.levels[1], deep.levels[1], false)],
+    spread: fast.spread,
   };
 }
 
@@ -209,8 +210,9 @@ export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveO
     tick = fmtTick(tickOf(ref, opts.nSigFigs, opts.szDecimals));
     groupings = groupingsAt(ref, opts.szDecimals, prev?.book.groupings);
     if (bids.px.length && asks.px.length) {
-      const abs = asks.px[0] - bids.px[0];
-      spread = fmt(abs, pxDecimals);
+      // Grouped levels are a whole step apart; the wire's spread is the real one.
+      const abs = snap.spread ? Number(snap.spread) : asks.px[0] - bids.px[0];
+      spread = fmt(abs, snap.spread ? Math.max(pxDecimals, fracDigits(snap.spread)) : pxDecimals);
       spreadPct = fmt((abs / ref) * 100, 3) + "%";
     }
   }

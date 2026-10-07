@@ -12,6 +12,8 @@ export interface WireL2Book {
   levels: [WireLevel[], WireLevel[]];
   /** Present (true) only on messages from a `fast: true` subscription. */
   fast?: boolean;
+  /** Present only on grouped (`nSigFigs`) messages: the true full-precision spread. */
+  spread?: string;
 }
 
 /** One fill from the `trades` channel. Batches arrive oldest → newest. */

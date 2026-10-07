@@ -52,6 +52,14 @@ describe("deriveBook", () => {
     expect(eth.spread).toBe("0.1");
   });
 
+  it("uses the wire's full-precision spread when grouped", () => {
+    const grouped = { ...snap([["83000.0", "1"]], [["84000.0", "1"]]), spread: "1.0" };
+    expect(derive(grouped, null, { ...opts, nSigFigs: 2 }).book).toMatchObject({ spread: "1", spreadPct: "0.001%" });
+    const eth = { ...snap([["2560.0", "1"]], [["2570.0", "1"]]), spread: "0.1" };
+    expect(derive(eth, null, { ...opts, nSigFigs: 3 }).book.spread).toBe("0.1");
+    expect(mergeSnapshots(grouped, snap([["82000.0", "1"]], [["85000.0", "1"]]))!.spread).toBe("1.0");
+  });
+
   it("derives the grouping tick from nSigFigs and price magnitude, not from level gaps", () => {
     const thin = snap([["83450.0", "1"], ["83447.0", "1"]], [["83453.0", "1"]]); // gaps of 3
     expect(derive(thin).book.tick).toBe("1");
