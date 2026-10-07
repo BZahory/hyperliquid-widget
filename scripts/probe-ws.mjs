@@ -1,14 +1,5 @@
-// Verifies the Hyperliquid l2Book feed against the assumptions the app is built on.
-// Run: node scripts/probe-ws.mjs   (needs Node >= 22 for the global WebSocket)
-//
-// Findings this script reproduces (2026-10-07, mainnet):
-//   - subscriptionResponse echoes a *normalised* subscription (adds mantissa:null, fast:false).
-//   - l2Book data is a full snapshot: {coin, time, levels:[bids desc, asks asc]}, px/sz strings,
-//     n number; 20 levels per side; a `spread` key appears when nSigFigs is set.
-//   - Default push rate is one snapshot every ~5s (gaps of 1-5.5s); `fast: true` makes it ~2/s.
-//   - After a precision change on the same coin, old-grouping stragglers can arrive, but only
-//     before the new subscription's ACK — never after.
-//   - A duplicate subscribe gets {channel:"error", data:"Already subscribed: ..."}.
+// Reproduces the live-feed findings the app relies on (see README): normalised ACKs, full snapshots,
+// the two cadences, pre-ACK stragglers. Run: node scripts/probe-ws.mjs (Node ≥ 22).
 const t0 = Date.now();
 const log = (...a) => console.log(`[+${String(Date.now() - t0).padStart(5)}ms]`, ...a);
 const ws = new WebSocket("wss://api.hyperliquid.xyz/ws");
@@ -63,9 +54,8 @@ ws.onmessage = (ev) => {
       log("first snapshot keys:", Object.keys(msg.data), "bids:", bids.length, "asks:", asks.length);
       log("bid0:", JSON.stringify(bids[0]), "ask0:", JSON.stringify(asks[0]));
     }
-    // A snapshot is at the old grouping if its top-of-book step is not a multiple of the new
-    // step (old was finer) or is at least the old step (old was coarser). Thin tops can still
-    // produce false positives, so treat the counts as an upper bound.
+    // Old grouping if the top step isn't a multiple of the new step (old finer) or ≥ the old step (old
+    // coarser). Thin tops can produce false positives, so treat the counts as an upper bound.
     const digits = Math.floor(Math.log10(Number(msg.data.levels[1][0].px))) + 1;
     const stepOf = (n) => (n === null ? 1 : 10 ** (digits - n));
     const s = step(msg.data);

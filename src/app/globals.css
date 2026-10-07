@@ -31,7 +31,7 @@
     border-radius: 12px;
   }
 
-  /* ---- Book rows: fixed geometry, nothing here may change size with the data. ---- */
+  /* Book rows: fixed geometry, nothing here may change size with the data. */
   .row {
     position: relative;
     display: grid;
@@ -83,9 +83,8 @@
     background: color-mix(in srgb, var(--color-bid) 24%, transparent);
   }
 
-  /* Hover: highlight every level between the touch and the cursor, i.e. what a market
-     order of that depth would sweep. Asks render worst→best so the range is the following
-     siblings; bids render best→worst so it is the preceding ones (via :has). */
+  /* Hover: highlight every level between the touch and the cursor (what a market order would sweep).
+     Asks render worst→best so the range is the following siblings; for bids it is the preceding ones. */
   .row::after {
     content: "";
     position: absolute;
@@ -101,14 +100,13 @@
     background: rgba(255, 255, 255, 0.09);
   }
 
-  /* One-shot change feedback on the size cell. Two identical keyframe sets per direction:
-     alternating the animation *name* restarts it on consecutive changes without remounting. */
+  /* Two identical keyframe sets per direction: alternating the animation name restarts it on
+     consecutive changes without remounting. */
   .flash-up-a > .sz { animation: flash-up-a 420ms ease-out; }
   .flash-up-b > .sz { animation: flash-up-b 420ms ease-out; }
   .flash-down-a > .sz { animation: flash-down-a 420ms ease-out; }
   .flash-down-b > .sz { animation: flash-down-b 420ms ease-out; }
 
-  /* Loading skeleton: shimmering placeholders in the fixed cells. */
   .row[data-kind="skeleton"] > .sz {
     height: 100%;
     padding-block: 0;

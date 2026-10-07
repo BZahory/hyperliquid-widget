@@ -35,8 +35,8 @@ export const store = createStore<BookState>(() => ({
   trades: EMPTY_TRADES,
 }));
 
-// ---- Ingestion. One latest-wins slot per book cadence plus a capped trade list; a single rAF
-// flushes everything at most once per frame, so React never renders more than once per frame. ----
+// Latest-wins slots per book cadence plus a capped trade list, flushed by one rAF:
+// React never renders more than once per frame.
 let fast: WireL2Book | null = null;
 let deep: WireL2Book | null = null;
 let bookDirty = false;
@@ -75,7 +75,7 @@ function schedule() {
   if (!raf) raf = requestAnimationFrame(flush);
 }
 
-/** Swap the book subscriptions to the current (coin, nSigFigs); whatever arrives next is a clean baseline. */
+/** Swap the book subscriptions to the current (coin, nSigFigs); what arrives next is a clean baseline. */
 function resubscribeBook() {
   stopBook?.();
   fast = deep = derived = null;
@@ -113,14 +113,12 @@ function resubscribeTrades() {
 
 let booted = false;
 
-/** Boot the data layer; idempotent. */
 export function boot() {
   if (booted) return;
   booted = true;
   onStatus((status) => {
-    // Never merge a snapshot from before a disconnect with one from after it: after sleep the
-    // deep buffer could be minutes old while the fast one is fresh. The last book stays on
-    // screen (dimmed) until new data replaces it.
+    // Never merge snapshots from before and after a disconnect (the deep buffer could be minutes old
+    // after sleep). The last book stays on screen, dimmed, until new data arrives.
     if (status !== "live") {
       fast = deep = derived = null;
       recent = [];
@@ -151,7 +149,7 @@ export function setPrecision(nSigFigs: NSigFigs) {
   resubscribeBook();
 }
 
-/** Display-only change: re-derive the buffered data on the next frame instead of waiting for it. */
+/** Display-only change: re-derive the buffered data on the next frame. */
 export function setQuote(quote: boolean) {
   if (quote === store.getState().quote) return;
   store.setState({ quote });

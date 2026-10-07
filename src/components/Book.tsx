@@ -30,7 +30,7 @@ export function Book() {
 
   return (
     <div data-testid="book" data-loading={loading || undefined}>
-      {/* Asks: worst at the top, best touching the spread. Slot index is the key, never price. */}
+      {/* Asks: best price touches the spread. Slot index is the key, never price. */}
       <div className="asks" data-testid="asks">
         {book.asks.map((slot, i) => row("ask", slot, i)).reverse()}
       </div>

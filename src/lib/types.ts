@@ -1,7 +1,4 @@
-/**
- * Wire types: exactly what Hyperliquid puts on the socket. Every numeric is a
- * string here and is parsed exactly once, in `derive.ts`.
- */
+/** Wire shapes as Hyperliquid sends them: every numeric is a string, parsed once in derive.ts. */
 export interface WireLevel {
   px: string;
   sz: string;
@@ -32,10 +29,7 @@ export type Coin = "BTC" | "ETH";
 /** `nSigFigs` of the l2Book subscription; null = full precision. */
 export type NSigFigs = null | 5 | 4 | 3 | 2;
 
-/**
- * Display types: preformatted strings and 0..1 ratios. Components render these
- * verbatim and never parse or format.
- */
+/** Display shapes: preformatted strings and 0..1 ratios; components never parse or format. */
 export type Flash = "" | "up" | "down";
 
 export interface Slot {

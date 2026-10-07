@@ -57,12 +57,8 @@ function fracDigits(px: string): number {
   return end - dot - 1;
 }
 
-/**
- * Price step of the current grouping. Hyperliquid perp prices carry at most 5 significant
- * figures and at most (6 - szDecimals) decimals, integers always allowed; `nSigFigs` groups to
- * that many figures of the current magnitude. Deterministic, unlike the gap between levels,
- * which widens whenever the top of a book thins out.
- */
+/** Price step of a grouping from Hyperliquid's tick rules (≤5 significant figures, ≤ 6 − szDecimals
+ *  decimals, integers always allowed). Deterministic, unlike level gaps, which widen when a book thins. */
 function tickOf(price: number, nSigFigs: NSigFigs, szDecimals: number): number {
   const digits = Math.floor(Math.log10(price)) + 1;
   if (nSigFigs !== null) return 10 ** (digits - nSigFigs);
@@ -71,11 +67,8 @@ function tickOf(price: number, nSigFigs: NSigFigs, szDecimals: number): number {
 
 const fmtTick = (tick: number) => fmt(tick, Math.max(0, -Math.round(Math.log10(tick))));
 
-/**
- * The precision menu, labelled by price step: every nSigFigs option coarser than full precision,
- * then full precision itself. Reuses the previous array when nothing changed so the footer only
- * re-renders when the price crosses a power of ten.
- */
+/** Precision options labelled by price step, coarse → fine, ending with full precision. Reuses the
+ *  previous array when unchanged so the footer only re-renders when the price crosses a power of ten. */
 function groupingsAt(price: number, szDecimals: number, prev: Grouping[] | undefined): Grouping[] {
   const full = tickOf(price, null, szDecimals);
   const next: Grouping[] = [];
@@ -90,7 +83,7 @@ function groupingsAt(price: number, szDecimals: number, prev: Grouping[] | undef
 
 interface Side {
   bids: boolean;
-  /** Wire price strings of the displayed levels — canonical within one grouping, used as change-detection keys. */
+  /** Wire price strings of the displayed levels: canonical within one grouping, so usable as change-detection keys. */
   keys: string[];
   px: number[];
   sz: number[];
@@ -145,8 +138,8 @@ function buildSlots(side: Side, prev: Derived | null, max: number, pxDecimals: n
       continue;
     }
     const size = side.sz[i];
-    // Flash state belongs to the slot and persists until the next change there, so a finished
-    // animation is never re-triggered by unrelated frames or by rows shifting position.
+    // Flash state lives on the slot until the next change there, so finished animations never
+    // re-trigger from unrelated frames or row shifts.
     const prevSlot = prevSlots ? prevSlots[i] : EMPTY_SLOT;
     let flash = prevSlot.flash;
     let flashSeq = prevSlot.flashSeq;
@@ -154,8 +147,8 @@ function buildSlots(side: Side, prev: Derived | null, max: number, pxDecimals: n
       const before = prev.sizes[i0].get(side.keys[i]);
       let dir: Flash = "";
       if (before === undefined) {
-        // Unknown price inside the range we already knew = a new level. Beyond it = depth we
-        // only just learned about (e.g. the deep snapshot landing after the fast one), not news.
+        // Unknown price inside the known range = new level; beyond it = depth we only just learned
+        // about (e.g. the deep snapshot landing after the fast one), not news.
         const inside = side.bids ? side.px[i] > prev.edges[i0] : side.px[i] < prev.edges[i0];
         if (inside) dir = "up";
       } else if (size !== before) {
@@ -178,11 +171,8 @@ function buildSlots(side: Side, prev: Derived | null, max: number, pxDecimals: n
   return slots;
 }
 
-/**
- * Combine the two feed cadences into one snapshot: the fast top-of-book levels verbatim, then
- * the deep snapshot's levels strictly beyond the last fast price on each side. Deep levels that
- * overlap the fast range are dropped because they are up to ~5s older than the fast ones.
- */
+/** Merge the two cadences: fast top-of-book verbatim, then deep levels strictly beyond the last fast
+ *  price on each side. Overlapping deep levels are dropped as up to ~5s older than the fast ones. */
 export function mergeSnapshots(fast: WireL2Book | null, deep: WireL2Book | null): WireL2Book | null {
   if (!fast || !deep) return fast ?? deep;
   const tail = (top: WireLevel[], rest: WireLevel[], bids: boolean) => {
@@ -197,12 +187,8 @@ export function mergeSnapshots(fast: WireL2Book | null, deep: WireL2Book | null)
   };
 }
 
-/**
- * The whole per-frame derivation in one pass: parse, cumulative sums, a max shared by both
- * sides (so bid and ask depth are visually comparable), change detection against the previous
- * frame, and display formatting. Pass `prev = null` after a symbol/precision switch so the
- * first snapshot renders as a clean baseline with no flashes.
- */
+/** One-pass derivation: parse, cumulative sums, a max shared by both sides, change detection against
+ *  the previous frame, formatting. `prev = null` renders a clean baseline with no flashes. */
 export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveOptions): Derived {
   const bids = parseSide(snap.levels[0], true);
   const asks = parseSide(snap.levels[1], false);
@@ -245,10 +231,8 @@ export function prependTrades(recent: readonly WireTrade[], batch: readonly Wire
   return batch.slice().reverse().concat(recent).slice(0, TRADES);
 }
 
-/**
- * Display rows for the trades tab. `fresh` is how many leading trades arrived since the previous
- * frame: only those slots get a new flash, so rows that merely shifted down do not re-animate.
- */
+/** Trades tab rows. Only the `fresh` leading slots (new since the last frame) get a new flash, so rows
+ *  that merely shifted down do not re-animate. */
 export function deriveTrades(
   recent: readonly WireTrade[],
   fresh: number,

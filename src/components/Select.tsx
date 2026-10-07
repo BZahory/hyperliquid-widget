@@ -12,9 +12,9 @@ interface SelectProps<T> {
   value: T;
   options: readonly Option<T>[];
   onChange: (value: T) => void;
-  /** Visible text for the closed control instead of the selected label (which stays available to AT). */
+  /** Visible text for the closed control instead of the selected label (which stays exposed to AT). */
   display?: string;
-  /** Icon-only trigger (e.g. a menu glyph); the selected label stays available to AT. */
+  /** Icon-only trigger; the selected label stays exposed to AT. */
   icon?: ReactNode;
   /** Which way the list opens and which edge it hugs. */
   direction?: "down" | "up";
@@ -22,11 +22,8 @@ interface SelectProps<T> {
   className?: string;
 }
 
-/**
- * Select-only combobox (WAI-ARIA pattern): focus stays on the button, the active option is
- * announced via aria-activedescendant, arrows/Home/End move, Enter/Space pick, Escape closes,
- * and focus leaving the control closes it. No effects needed.
- */
+/** WAI-ARIA select-only combobox: focus stays on the button, aria-activedescendant tracks the active
+ *  option, arrows/Home/End move, Enter/Space pick, Escape or blur closes. No effects needed. */
 export function Select<T extends string | number | null>({
   label,
   value,

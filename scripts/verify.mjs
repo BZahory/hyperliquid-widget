@@ -1,7 +1,5 @@
-// Drives the widget in real Chromium against live mainnet data and reports what it observed.
-// Run: pnpm verify                       (dev server on http://localhost:3000)
-//      URL=https://<deploy>.vercel.app pnpm verify
-// Writes verify.png next to the repo for a visual check.
+// Drives the widget in real Chromium against live mainnet and reports what it observed.
+// Run: pnpm verify (dev server on :3000) or URL=https://… pnpm verify. Writes verify.png.
 import { chromium } from "playwright";
 
 const url = process.env.URL ?? "http://localhost:3000";
@@ -15,10 +13,8 @@ const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 560, height: 1000 } });
 const page = await context.newPage();
 
-// Re-render discipline, measured at the React level: stand in for the React DevTools hook and,
-// on every commit, count memoized Row fibers that did work vs. Row fibers whose props changed
-// (or just mounted). Cumulative totals and the shared max legitimately touch most rows on a
-// tick; what must never happen is a row rendering with identical props.
+// Re-render discipline at the React level: stand in for the DevTools hook and, per commit, count Row
+// fibers that rendered vs. whose props changed (or mounted). Rendering with identical props is the failure.
 await page.addInitScript(() => {
   const PerformedWork = 1;
   const shallowEqual = (a, b) => a === b || (a && b && Object.keys(a).every((k) => a[k] === b[k]));
@@ -97,13 +93,11 @@ async function countChanges(ms) {
 try {
 await page.goto(url, { waitUntil: "domcontentloaded" });
 
-// 1. Connects and renders real levels.
 await waitForStatus("live");
 await waitForLevels();
 const initial = await prices();
 check("connects and renders levels", initial.length >= 20, `${initial.length} level rows`);
 
-// 2. Visibly updates from the feed.
 const changes = await countChanges(5_000);
 check("book updates visibly", changes >= 3, `${changes} distinct frames in 5s`);
 const flashes = await page.$$eval('.row[class*="flash-"]', (r) => r.length);
@@ -115,7 +109,6 @@ check(
   `${stats.commits} commits; avg ${(stats.rendered / stats.commits).toFixed(1)} of ${stats.rows} rows rendered per frame`,
 );
 
-// 3. Layout stability: digits are tabular so values never move pixels.
 const tabular = await page.evaluate(() => {
   const probe = (text) => {
     const s = document.createElement("span");
@@ -134,9 +127,7 @@ const rowHeights = await page.$$eval('[data-testid="book"] .row', (rows) =>
 );
 check("all book rows share one fixed height", rowHeights.length === 1, `${rowHeights.join(", ")}px`);
 
-// 4. Precision dropdown resubscribes and visibly regroups prices. Options are labelled by price
-// step (coarse → fine, ending with full precision); pick the coarsest and check every price sits
-// on that step.
+// Options are labelled by price step, coarse → fine; pick the coarsest and check every price sits on it.
 const visibleTick = () => page.getByRole("combobox", { name: "Price grouping" }).locator("span").first().textContent();
 const tickBefore = await visibleTick();
 await page.getByRole("combobox", { name: "Price grouping" }).click();
@@ -152,7 +143,6 @@ check(
   `options [${labels.join(" · ")}]; tick ${tickBefore} → ${await visibleTick()}${offGrid.length ? `; off-grid: ${offGrid.join(" ")}` : ""}`,
 );
 
-// 5. Symbol switch shows no stale rows: skeleton at once, then a book in a different price regime.
 await page.getByRole("combobox", { name: "Market" }).click();
 await page.getByRole("option", { name: "ETH-USD" }).click();
 const rightAfter = await page.evaluate(() => ({
@@ -164,7 +154,6 @@ await waitForLevels();
 const eth = await prices();
 check("ETH book renders after switch", eth.length >= 20 && Math.max(...eth) < Math.min(...initial) / 5, `ETH ≈ ${eth[0]} vs BTC ≈ ${initial[0]}`);
 
-// 5b. Trades tab: recent fills render with side colouring and clock times, then back to Orders.
 await page.getByRole("tab", { name: "Trades" }).click();
 await page.waitForFunction(() => document.querySelectorAll('[data-testid="trades"] .row[data-kind="level"]').length >= 10, null, {
   timeout: 20_000,
@@ -180,7 +169,7 @@ check(
 await page.getByRole("tab", { name: "Orders" }).click();
 await waitForLevels();
 
-// 6. Keyboard: the dropdowns work without a mouse. End + Enter picks the last option, full precision.
+// End + Enter picks the last option: full precision.
 const grouping = page.getByRole("combobox", { name: "Price grouping" });
 const tickCoarse = Number((await visibleTick()).replace(/,/g, ""));
 await grouping.focus();
@@ -199,7 +188,6 @@ await waitForLevels();
 const tickFull = Number((await visibleTick()).replace(/,/g, ""));
 check("keyboard selects full precision", tickFull < tickCoarse, `grouping ${tickCoarse} → ${tickFull}`);
 
-// 7. Offline → status changes → online → data resumes without reload.
 await context.setOffline(true);
 await waitForStatus("offline");
 check("offline is reported", true);

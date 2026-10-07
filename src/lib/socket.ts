@@ -1,11 +1,7 @@
 import type { NSigFigs, WireL2Book, WireTrade } from "./types";
 
-/**
- * Module-level WebSocket manager. Owns the single mainnet socket, a subscription registry
- * keyed by the subscription's identity, reconnect with exponential backoff + jitter, resubscribe
- * on every open, a ping that doubles as a liveness watchdog, and offline/online/visibility
- * listeners so the status indicator can never say "live" over a dead connection.
- */
+/** Owns the single mainnet socket: subscription registry, backoff + jitter reconnect, resubscribe on
+ *  open, ping/watchdog, and offline/online/visibility handling so "live" is never shown over a dead link. */
 export type Status = "connecting" | "live" | "reconnecting" | "offline";
 
 export type Sub =
@@ -13,10 +9,8 @@ export type Sub =
       type: "l2Book";
       coin: string;
       nSigFigs: NSigFigs;
-      /**
-       * The feed has two cadences (verified live): `fast: true` pushes the top 5 levels per side
-       * ~2×/s; the default pushes 20 levels per side but only every ~5s. The store merges both.
-       */
+      /** Verified live: `fast: true` pushes the top 5 levels ~2×/s; the default pushes 20 levels
+       *  every ~5s. The store merges both. */
       fast: boolean;
     }
   | { type: "trades"; coin: string };
@@ -35,12 +29,8 @@ const ACK_TIMEOUT_MS = 2_000;
 interface Entry {
   sub: Sub;
   onData: (data: never) => void;
-  /**
-   * l2Book messages do not echo nSigFigs, so after a precision change on the same coin a
-   * straggler at the old grouping can arrive. Verified live: stragglers only ever arrive
-   * *before* the new subscription's `subscriptionResponse`, never after it. So each entry
-   * drops data until its ACK (or a fail-open timeout), which filters stragglers exactly.
-   */
+  /** l2Book data doesn't echo nSigFigs, so old-grouping stragglers can follow a precision change.
+   *  Verified live: they only arrive before the new subscription's ACK, so data is dropped until then. */
   acked: boolean;
   ackTimer: ReturnType<typeof setTimeout> | undefined;
 }
@@ -127,16 +117,15 @@ function deliver(match: (sub: Sub) => boolean, data: unknown): boolean {
 
 function onMessage(ev: MessageEvent<string>) {
   const msg = JSON.parse(ev.data);
-  // Background tabs throttle timers to once a minute, past the server's idle cutoff; the
-  // message path is not throttled, so send the ping from here when it is due.
+  // Background tabs throttle timers past the server's idle cutoff; the message path is not
+  // throttled, so ping from here when due.
   if (Date.now() - lastPingAt >= PING_MS) ping();
   if (msg.channel === "l2Book") {
     const data = msg.data as WireL2Book;
     const fast = data.fast === true;
     const delivered = deliver((s) => s.type === "l2Book" && s.coin === data.coin && s.fast === fast, data);
-    // "Live" means snapshots are reaching the book, not merely that the socket opened or that
-    // some orphan stream is chatty. Backoff resets here too, so a server that accepts and
-    // immediately drops us cannot cause a tight loop.
+    // "Live" and the backoff reset follow snapshots reaching the book, not socket open or orphan
+    // streams, so an accept-then-drop server cannot cause a tight loop.
     if (delivered) {
       lastDataAt = Date.now();
       attempt = 0;
@@ -146,8 +135,7 @@ function onMessage(ev: MessageEvent<string>) {
     const data = msg.data as WireTrade[];
     if (data.length) deliver((s) => s.type === "trades" && s.coin === data[0].coin, data);
   } else if (msg.channel === "subscriptionResponse" && msg.data.method === "subscribe") {
-    // The server normalises the echoed subscription (adds mantissa/fast), so match on our
-    // own fields rather than deep-equality.
+    // The echo is normalised (adds mantissa/fast), so match on our own fields, not deep equality.
     const echoed = msg.data.subscription;
     const entry = registry.get(keyOf({ ...echoed, nSigFigs: echoed.nSigFigs ?? null, fast: echoed.fast === true }));
     if (entry) {
@@ -155,8 +143,7 @@ function onMessage(ev: MessageEvent<string>) {
       clearTimeout(entry.ackTimer);
     }
   }
-  // "pong" and "error" need no handling. Pongs deliberately don't feed the watchdog: they prove
-  // the socket, not the subscription, and a silent subscription must not read as "live".
+  // Pongs deliberately don't feed the watchdog: they prove the socket, not the subscription.
 }
 
 function dropSocket() {
@@ -219,13 +206,11 @@ function connect() {
   };
 }
 
-/** Idempotent; call once from the client. */
 export function start() {
   if (started) return;
   started = true;
   window.addEventListener("offline", () => {
-    // Drop at once so the indicator never lies, but keep retrying on the backoff schedule:
-    // navigator.onLine is a hint, not a guarantee, and "online" may never fire.
+    // navigator.onLine is only a hint and "online" may never fire, so keep retrying on the backoff schedule.
     dropSocket();
     scheduleReconnect();
   });
@@ -237,7 +222,7 @@ export function start() {
     connect();
   });
   document.addEventListener("visibilitychange", () => {
-    // Run the watchdog the moment the tab is visible again (a handshake in flight has its own timeout).
+    // A handshake in flight has its own timeout; only an open socket gets the watchdog.
     if (document.visibilityState === "visible" && ws?.readyState === WebSocket.OPEN) tick();
   });
   connect();

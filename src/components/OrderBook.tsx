@@ -27,8 +27,7 @@ const STATUS_LABEL: Record<Status, string> = {
 };
 
 export function OrderBook() {
-  // The only effect in the app: boot the data layer once the widget is on screen.
-  // `boot` is idempotent, so StrictMode's double invocation changes nothing.
+  // The app's only effect; boot is idempotent, so StrictMode's double call is harmless.
   useEffect(boot, []);
 
   return (
