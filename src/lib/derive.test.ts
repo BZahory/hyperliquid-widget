@@ -120,12 +120,31 @@ describe("deriveBook", () => {
     expect(gapFilled.book.bids[2]).toMatchObject({ px: "99.85", flash: "up", flashSeq: 1 });
   });
 
-  it("re-deriving the same snapshot with new display options keeps flash state and changes units", () => {
+  it("re-deriving the identical snapshot in quote mode keeps flash state and switches units", () => {
     const a = derive(snap([["100.0", "1"]], [["101.0", "1"]]));
-    const b = derive(snap([["100.0", "2"]], [["101.0", "1"]]), a);
-    const c = derive(snap([["100.0", "2.4"]], [["101.0", "1"]]), b, { ...opts, quote: true });
-    expect(c.book.bids[0]).toMatchObject({ sz: "240", total: "240", flash: "up", flashSeq: 2 });
+    const changed = snap([["100.0", "2.4"]], [["101.0", "1"]]);
+    const b = derive(changed, a);
+    const c = derive(changed, b, { ...opts, quote: true });
+    expect(c.book.bids[0]).toMatchObject({ sz: "240", total: "240", flash: "up", flashSeq: 1 });
     expect(c.book.asks[0].sz).toBe("101"); // 1 × 101.0, rounded to whole USD
+  });
+
+  it("quote mode accumulates each level's own notional and scales bars by it", () => {
+    const { book } = derive(snap([["2500.0", "1"], ["2400.0", "1"], ["2300.0", "1"]], [["2600.0", "2"]]), null, {
+      ...opts,
+      quote: true,
+    });
+    expect(book.bids.slice(0, 3).map((s) => s.total)).toEqual(["2,500", "4,900", "7,200"]);
+    expect(book.asks[0].total).toBe("5,200");
+    expect(book.bids[2].ratio).toBe(1);
+    expect(book.asks[0].ratio).toBeCloseTo(5200 / 7200);
+    expect(book.bidShare).toBeCloseTo(7200 / 12400);
+  });
+
+  it("does not flash when a previously empty side gains levels", () => {
+    const a = derive(snap([], [["101.0", "1"]]));
+    const b = derive(snap([["100.0", "1"], ["99.9", "1"]], [["101.0", "1"]]), a);
+    expect(b.book.bids.slice(0, 2).map((s) => s.flash)).toEqual(["", ""]);
   });
 });
 
@@ -146,6 +165,13 @@ describe("mergeSnapshots", () => {
     const merged = mergeSnapshots(fast, deep)!;
     expect(merged.levels[0].map((l) => `${l.px}@${l.sz}`)).toEqual(["100.0@1", "99.9@1", "99.8@9", "99.7@9"]);
     expect(merged.levels[1].map((l) => `${l.px}@${l.sz}`)).toEqual(["100.1@1", "100.2@1", "100.3@9", "100.4@9"]);
+  });
+
+  it("drops every deep level overlapping the fast range after a sharp move", () => {
+    // Price fell: the deep snapshot's asks all sit above the fast top, its bids all overlap.
+    const moved = mergeSnapshots(snap([["95.0", "1"], ["94.9", "1"]], [["95.1", "1"], ["95.2", "1"]]), deep)!;
+    expect(moved.levels[0].map((l) => l.px)).toEqual(["95.0", "94.9"]);
+    expect(moved.levels[1].map((l) => l.px)).toEqual(["95.1", "95.2", "100.0", "100.1", "100.2", "100.3", "100.4"]);
   });
 
   it("falls back to the whole deep side when the fast side is empty", () => {

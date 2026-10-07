@@ -116,6 +116,10 @@
     animation: shimmer 1.2s ease-in-out infinite;
   }
 
+  .pulse {
+    animation: pulse-dot 1.2s ease-in-out infinite;
+  }
+
   .stale {
     opacity: 0.55;
     filter: saturate(0.5);

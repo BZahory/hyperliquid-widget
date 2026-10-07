@@ -56,10 +56,11 @@ await page.addInitScript(() => {
   window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = new Proxy(hook, { get: (t, k) => (k in t ? t[k] : () => {}) });
 });
 const consoleErrors = [];
-page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
+// A reconnect attempt while offline logs a failed-connection error; that is the expected path.
+const expected = /ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED/;
+page.on("console", (m) => m.type() === "error" && !expected.test(m.text()) && consoleErrors.push(m.text()));
 page.on("pageerror", (e) => consoleErrors.push(String(e)));
 
-const status = () => page.getAttribute('[data-testid="status"]', "data-status");
 const waitForStatus = (s, timeout = 20_000) =>
   page.waitForSelector(`[data-testid="status"][data-status="${s}"]`, { timeout });
 /** Resolve once both cadences have landed: the fast top-5 alone would give only 10 level rows. */
@@ -93,12 +94,14 @@ async function countChanges(ms) {
   return changes;
 }
 
+try {
 await page.goto(url, { waitUntil: "domcontentloaded" });
 
 // 1. Connects and renders real levels.
 await waitForStatus("live");
 await waitForLevels();
-check("connects and renders levels", (await prices()).length >= 20, `${(await prices()).length} level rows`);
+const initial = await prices();
+check("connects and renders levels", initial.length >= 20, `${initial.length} level rows`);
 
 // 2. Visibly updates from the feed.
 const changes = await countChanges(5_000);
@@ -150,17 +153,21 @@ check(
   `tick ${tickBefore} → ${await visibleTick()}${offGrid.length ? `; off-grid: ${offGrid.join(" ")}` : ""}`,
 );
 
-// 5. Symbol switch shows no stale rows.
+// 5. Symbol switch shows no stale rows: skeleton at once, then a book in a different price regime.
 await page.getByRole("combobox", { name: "Market" }).click();
 await page.getByRole("option", { name: "ETH-USD" }).click();
-const rightAfter = await prices();
-check("switch clears old rows synchronously", rightAfter.every((p) => p < 10_000), `${rightAfter.length} level rows right after click`);
+const rightAfter = await page.evaluate(() => ({
+  levels: document.querySelectorAll('[data-testid="book"] .row[data-kind="level"]').length,
+  loading: document.querySelector('[data-testid="book"]').hasAttribute("data-loading"),
+}));
+check("switch clears old rows synchronously", rightAfter.levels === 0 && rightAfter.loading, `${rightAfter.levels} level rows, skeleton shown`);
 await waitForLevels();
 const eth = await prices();
-check("ETH book renders after switch", eth.length >= 10 && eth.every((p) => p < 10_000), `best ask region ≈ ${eth[eth.length - 1]}`);
+check("ETH book renders after switch", eth.length >= 20 && Math.max(...eth) < Math.min(...initial) / 5, `ETH ≈ ${eth[0]} vs BTC ≈ ${initial[0]}`);
 
 // 6. Keyboard: the dropdowns work without a mouse.
 const grouping = page.getByRole("combobox", { name: "Price grouping" });
+const tickAt3 = Number((await visibleTick()).replace(/,/g, ""));
 await grouping.focus();
 await page.keyboard.press("ArrowDown"); // opens
 await page.keyboard.press("Home");
@@ -174,24 +181,27 @@ await page.waitForFunction(
   { polling: 100, timeout: 10_000 },
 );
 await waitForLevels();
-const fine = await prices();
-const gaps = fine.slice(1).map((p, i) => Math.abs(p - fine[i])).filter((g) => g > 0);
-check("keyboard selects full precision", Math.min(...gaps) < 1, `selected label updated; min gap ${Math.min(...gaps).toFixed(2)}`);
+const tickFull = Number((await visibleTick()).replace(/,/g, ""));
+check("keyboard selects full precision", tickFull < tickAt3, `grouping ${tickAt3} → ${tickFull}`);
 
 // 7. Offline → status changes → online → data resumes without reload.
 await context.setOffline(true);
 await waitForStatus("offline");
-check("offline is reported", (await status()) === "offline");
+check("offline is reported", true);
 await context.setOffline(false);
 await waitForStatus("live", 30_000);
-check("reconnects when back online", (await status()) === "live");
+check("reconnects when back online", true);
 const resumed = await countChanges(5_000);
 check("data resumes after reconnect", resumed >= 2, `${resumed} distinct frames in 5s`);
 
 await page.screenshot({ path: process.env.SHOT ?? "verify.png" });
 check("zero console errors", consoleErrors.length === 0, consoleErrors.join(" | ").slice(0, 300));
-
-await browser.close();
+} catch (err) {
+  check("run completed", false, String(err).split("\n")[0]);
+  await page.screenshot({ path: process.env.SHOT ?? "verify.png" }).catch(() => {});
+} finally {
+  await browser.close();
+}
 const failed = results.filter((r) => !r).length;
 console.log(failed ? `\n${failed} check(s) failed` : "\nall checks passed");
 process.exit(failed ? 1 : 0);

@@ -30,8 +30,8 @@ export const store = createStore<BookState>(() => ({
 
 // ---- Ingestion. One latest-wins slot per feed cadence; a single rAF flushes both at most once
 // per frame, so React can never render more than once per frame regardless of message rate. ----
-let fast: WireL2Book | null = null; // top 5 levels/side, ~2×/s
-let deep: WireL2Book | null = null; // 20 levels/side, every ~5s
+let fast: WireL2Book | null = null;
+let deep: WireL2Book | null = null;
 let raf = 0;
 let derived: Derived | null = null;
 let teardown: (() => void) | null = null;
@@ -79,7 +79,7 @@ function resubscribe() {
 
 let booted = false;
 
-/** Boot the data layer. Idempotent, so React StrictMode's double effect is a no-op. */
+/** Boot the data layer; idempotent. */
 export function boot() {
   if (booted) return;
   booted = true;

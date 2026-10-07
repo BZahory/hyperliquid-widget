@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, type KeyboardEvent } from "react";
 import { useStore } from "zustand";
 import { boot, setCoin, setPrecision, setQuote, store } from "@/lib/store";
 import type { Status } from "@/lib/socket";
@@ -38,7 +38,7 @@ export function OrderBook() {
       <Header />
       <section className="card pb-1">
         <div className="flex items-end border-b border-line px-4 pt-2.5">
-          <h2 className="border-b-2 border-accent pb-2 text-[15px] font-medium leading-none">Order Book</h2>
+          <h1 className="border-b-2 border-accent pb-2 text-[15px] font-medium leading-none">Order Book</h1>
         </div>
         <ColumnHeaders />
         <Book />
@@ -86,11 +86,7 @@ function StatusDot({ status }: { status: Status }) {
       data-testid="status"
       data-status={status}
     >
-      <span
-        aria-hidden="true"
-        className={`size-2 rounded-full ${color}`}
-        style={status === "live" ? undefined : { animation: "pulse-dot 1.2s ease-in-out infinite" }}
-      />
+      <span aria-hidden="true" className={`size-2 rounded-full ${color}${status === "live" ? "" : " pulse"}`} />
       {STATUS_LABEL[status]}
     </div>
   );
@@ -125,30 +121,37 @@ function Footer() {
         direction="up"
         className="text-muted"
       />
-      <div className="flex gap-3 text-sm" role="radiogroup" aria-label="Size unit">
-        <UnitButton active={quote} onClick={() => setQuote(true)}>
-          USD
-        </UnitButton>
-        <UnitButton active={!quote} onClick={() => setQuote(false)}>
-          {coin}
-        </UnitButton>
-      </div>
+      <UnitRadios coin={coin} quote={quote} />
     </div>
   );
 }
 
-function UnitButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
-  return (
+/** Size unit as a radio group: one tab stop, arrows move the choice. */
+function UnitRadios({ coin, quote }: { coin: Coin; quote: boolean }) {
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+    e.preventDefault();
+    setQuote(!quote);
+    (e.currentTarget.children[quote ? 1 : 0] as HTMLElement).focus();
+  };
+  const radio = (active: boolean, label: string, value: boolean) => (
     <button
       type="button"
       role="radio"
       aria-checked={active}
-      onClick={onClick}
+      tabIndex={active ? 0 : -1}
+      onClick={() => setQuote(value)}
       className={`cursor-pointer rounded px-1 outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
         active ? "font-medium text-ink" : "text-muted hover:text-ink"
       }`}
     >
-      {children}
+      {label}
     </button>
+  );
+  return (
+    <div className="flex gap-3 text-sm" role="radiogroup" aria-label="Size unit" onKeyDown={onKeyDown}>
+      {radio(quote, "USD", true)}
+      {radio(!quote, coin, false)}
+    </div>
   );
 }

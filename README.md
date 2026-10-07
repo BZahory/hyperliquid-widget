@@ -10,8 +10,9 @@ pnpm install && pnpm dev     # http://localhost:3000
 ```
 
 Other commands: `pnpm test` (vitest, pure flush math) · `pnpm verify` (Playwright against a running
-dev server, or `URL=https://… pnpm verify` against a deployment) · `pnpm probe` (re-check the live
-API assumptions below) · `pnpm knip` · `pnpm lint` · `pnpm typecheck` · `pnpm build`.
+dev server, or `URL=https://… pnpm verify` against a deployment; once: `pnpm exec playwright install
+chromium`) · `pnpm probe` (re-check the live API assumptions below) · `pnpm knip` · `pnpm lint` ·
+`pnpm typecheck` · `pnpm build`.
 
 ## Data flow
 
@@ -21,7 +22,7 @@ wss://api.hyperliquid.xyz/ws
         ▼
 src/lib/socket.ts   module-level manager: registry keyed by (coin, nSigFigs, fast), routes by
         │           (coin, fast), drops data until the subscribe ACK, 30s ping + 45s watchdog,
-        │           backoff+jitter reconnect, resubscribe-all on open, offline/online listeners
+        │           backoff+jitter reconnect, resubscribe-all on open, offline/online/visibility
         ▼
 src/lib/store.ts    two latest-wins slots (fast top-5 feed, deep 20-level feed)
         │           ──► ONE requestAnimationFrame ──► commit()
@@ -67,10 +68,11 @@ Where the perf-sensitive choices live:
 - A silent connection is closed by the server after 60 s (measured: close code 1006 at 60.4 s), so
   a `{"method":"ping"}` goes out every 30 s. The same timer force-drops the socket if no snapshot
   arrived in 45 s — pongs deliberately don't count, because they prove the socket, not the
-  subscription. "Live" is set when snapshots arrive, not when the socket opens, backoff resets
-  only once data flows, a handshake that hangs is abandoned after 10 s, and the watchdog also runs
-  the moment the tab becomes visible or the browser reports `online`. Any transition away from
-  live clears both buffers so a pre-disconnect deep snapshot is never merged with fresh data.
+  subscription. "Live" is set when snapshots reach the book, not when the socket opens; backoff
+  resets only once data flows; a handshake that hangs is abandoned after 10 s; the watchdog also
+  runs when the tab becomes visible, and `online` replaces the socket outright. Background tabs
+  throttle timers, so the ping is also sent from the message path when due. Any transition away
+  from live clears both buffers so a pre-disconnect deep snapshot is never merged with fresh data.
 
 ## Reading the book
 
@@ -84,7 +86,8 @@ bars from the left) and then adds what a trader actually reads from a book:
   inside the range already shown), red when it shrank. Depth that merely scrolls into view or is
   learned from a deep snapshot does not flash. One-shot; a finished flash is never re-triggered by
   unrelated renders.
-- **Imbalance meter** under the book: share of displayed depth on each side.
+- **Imbalance meter** under the book: share of displayed depth on each side. Depth, totals and the
+  meter all follow the selected unit (base asset or USD notional).
 - **Sweep highlight** on hover: every level between the touch and the cursor lights up, i.e. what a
   market order of that depth would eat. Pure CSS (`:hover ~` for asks, `:has(~ :hover)` for bids).
 - **Grouping shown as a price step** in the footer (e.g. `10`), derived from `nSigFigs`, the
@@ -99,8 +102,8 @@ bars from the left) and then adds what a trader actually reads from a book:
   component. `cacheComponents`, `partialPrefetching` and the React Compiler were removed from the
   generated config: a single static page with no server data gains nothing from them, and explicit
   `memo` keeps the re-render story inspectable.
-- **Tailwind v4** for layout utilities; the row geometry, bars, flashes and hover rules are ~60 lines
-  of plain CSS where they're easier to read as one unit.
+- **Tailwind v4** for layout utilities; the row geometry, bars, flashes, skeleton and hover rules are
+  plain CSS in `globals.css`, where they're easier to read as one unit.
 - **zustand (vanilla store)** — an external store the data layer can write to from a rAF callback,
   consumed with `useStore` selectors so the header, book and footer each re-render only for the
   slice they read. No provider, no reducers.

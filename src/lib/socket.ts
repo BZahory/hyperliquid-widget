@@ -48,6 +48,7 @@ let status: Status = "connecting";
 let ws: WebSocket | null = null;
 let attempt = 0;
 let lastDataAt = 0;
+let lastPingAt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let connectTimer: ReturnType<typeof setTimeout> | undefined;
 let pingTimer: ReturnType<typeof setInterval> | undefined;
@@ -106,17 +107,27 @@ export function subscribe(sub: L2BookSub, onData: Entry["onData"]): () => void {
 
 function onMessage(ev: MessageEvent<string>) {
   const msg = JSON.parse(ev.data);
+  // Background tabs throttle timers to once a minute, past the server's idle cutoff; the
+  // message path is not throttled, so send the ping from here when it is due.
+  if (Date.now() - lastPingAt >= PING_MS) ping();
   if (msg.channel === "l2Book") {
-    // "Live" means snapshots are arriving, not merely that the socket opened. Backoff resets
-    // here too, so a server that accepts and immediately drops us cannot cause a tight loop.
-    lastDataAt = Date.now();
-    attempt = 0;
-    setStatus("live");
     const data = msg.data as WireL2Book;
     // Route by (coin, cadence): a message for a switched-away coin finds no entry and drops here.
     const fast = data.fast === true;
+    let delivered = false;
     for (const entry of registry.values()) {
-      if (entry.acked && entry.sub.coin === data.coin && entry.sub.fast === fast) entry.onData(data);
+      if (entry.acked && entry.sub.coin === data.coin && entry.sub.fast === fast) {
+        entry.onData(data);
+        delivered = true;
+      }
+    }
+    // "Live" means snapshots are reaching the book, not merely that the socket opened or that
+    // some orphan stream is chatty. Backoff resets here too, so a server that accepts and
+    // immediately drops us cannot cause a tight loop.
+    if (delivered) {
+      lastDataAt = Date.now();
+      attempt = 0;
+      setStatus("live");
     }
   } else if (msg.channel === "subscriptionResponse" && msg.data.method === "subscribe") {
     // The server normalises the echoed subscription (adds mantissa/fast), so match on our
@@ -150,6 +161,12 @@ function scheduleReconnect() {
   setStatus(navigator.onLine ? "reconnecting" : "offline");
 }
 
+function ping() {
+  if (ws?.readyState !== WebSocket.OPEN) return;
+  lastPingAt = Date.now();
+  ws.send(JSON.stringify({ method: "ping" }));
+}
+
 /** Keep the server's idle timer at bay, and drop a socket whose snapshots have stopped. */
 function tick() {
   if (Date.now() - lastDataAt > STALE_MS) {
@@ -158,7 +175,7 @@ function tick() {
     scheduleReconnect();
     return;
   }
-  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ method: "ping" }));
+  ping();
 }
 
 function connect() {
@@ -172,7 +189,7 @@ function connect() {
   }, CONNECT_TIMEOUT_MS);
   socket.onopen = () => {
     clearTimeout(connectTimer);
-    lastDataAt = Date.now(); // grace period until the first snapshot
+    lastDataAt = lastPingAt = Date.now(); // grace period until the first snapshot
     for (const entry of registry.values()) {
       send("subscribe", entry.sub);
       armAck(entry);
@@ -204,8 +221,8 @@ export function start() {
     connect();
   });
   document.addEventListener("visibilitychange", () => {
-    // Background tabs throttle timers; run the watchdog the moment the tab is visible again.
-    if (document.visibilityState === "visible" && ws) tick();
+    // Run the watchdog the moment the tab is visible again (a handshake in flight has its own timeout).
+    if (document.visibilityState === "visible" && ws?.readyState === WebSocket.OPEN) tick();
   });
   connect();
 }

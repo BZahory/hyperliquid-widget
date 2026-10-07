@@ -5,7 +5,7 @@
 //   - subscriptionResponse echoes a *normalised* subscription (adds mantissa:null, fast:false).
 //   - l2Book data is a full snapshot: {coin, time, levels:[bids desc, asks asc]}, px/sz strings,
 //     n number; 20 levels per side; a `spread` key appears when nSigFigs is set.
-//   - Default push rate is one snapshot every ~3-5s; `fast: true` makes it ~2/s.
+//   - Default push rate is one snapshot every ~5s (gaps of 1-5.5s); `fast: true` makes it ~2/s.
 //   - After a precision change on the same coin, old-grouping stragglers can arrive, but only
 //     before the new subscription's ACK — never after.
 //   - A duplicate subscribe gets {channel:"error", data:"Already subscribed: ..."}.
@@ -66,7 +66,8 @@ ws.onmessage = (ev) => {
     // A snapshot is at the old grouping if its top-of-book step is not a multiple of the new
     // step (old was finer) or is at least the old step (old was coarser). Thin tops can still
     // produce false positives, so treat the counts as an upper bound.
-    const stepOf = (n) => (n === null ? 1 : 10 ** (5 - n));
+    const digits = Math.floor(Math.log10(Number(msg.data.levels[1][0].px))) + 1;
+    const stepOf = (n) => (n === null ? 1 : 10 ** (digits - n));
     const s = step(msg.data);
     const stale = prev !== null && (s % stepOf(cur) !== 0 || (stepOf(prev) > stepOf(cur) && s >= stepOf(prev)));
     if (stale && acked !== cur) beforeAck++;

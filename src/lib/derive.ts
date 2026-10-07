@@ -6,7 +6,7 @@ export const DEPTH = 11;
 export interface DeriveOptions {
   szDecimals: number;
   nSigFigs: NSigFigs;
-  /** Show size/total in quote currency (USD) instead of base. */
+  /** Show size/total/depth in quote currency (USD) instead of base. */
   quote: boolean;
 }
 
@@ -16,7 +16,7 @@ type Sizes = ReadonlyMap<string, number>;
 export interface Derived {
   book: DisplayBook;
   sizes: [bids: Sizes, asks: Sizes];
-  /** Deepest price known per side last frame; levels beyond it are learned, not new. */
+  /** Deepest price known per side last frame (±Infinity when that side was empty); levels beyond it are learned, not new. */
   edges: [bid: number, ask: number];
 }
 
@@ -71,7 +71,9 @@ interface Side {
   keys: string[];
   px: number[];
   sz: number[];
+  /** Cumulative size in base units, and in quote units (Σ size × price). */
   cum: number[];
+  cumQuote: number[];
   sizes: Map<string, number>;
   edge: number;
   pxDecimals: number;
@@ -83,8 +85,10 @@ function parseSide(levels: WireLevel[], bids: boolean): Side {
   const px = new Array<number>(n);
   const sz = new Array<number>(n);
   const cum = new Array<number>(n);
+  const cumQuote = new Array<number>(n);
   const sizes = new Map<string, number>();
   let acc = 0;
+  let accQuote = 0;
   let pxDecimals = 0;
   for (let i = 0; i < levels.length; i++) {
     const level = levels[i];
@@ -96,26 +100,22 @@ function parseSide(levels: WireLevel[], bids: boolean): Side {
     px[i] = Number(level.px);
     sz[i] = size;
     acc += size;
+    accQuote += size * px[i];
     cum[i] = acc;
+    cumQuote[i] = accQuote;
     pxDecimals = Math.max(pxDecimals, fracDigits(level.px));
   }
-  const edge = levels.length ? Number(levels[levels.length - 1].px) : bids ? -Infinity : Infinity;
-  return { bids, keys, px, sz, cum, sizes, edge, pxDecimals };
+  // An empty side knows no prices, so nothing can be "inside" its range next frame.
+  const edge = levels.length ? Number(levels[levels.length - 1].px) : bids ? Infinity : -Infinity;
+  return { bids, keys, px, sz, cum, cumQuote, sizes, edge, pxDecimals };
 }
 
-function buildSlots(
-  side: Side,
-  prev: Derived | null,
-  max: number,
-  pxDecimals: number,
-  opts: DeriveOptions,
-): Slot[] {
+function buildSlots(side: Side, prev: Derived | null, max: number, pxDecimals: number, opts: DeriveOptions): Slot[] {
   const i0 = side.bids ? 0 : 1;
-  const prevSizes = prev?.sizes[i0];
-  const prevEdge = prev?.edges[i0] ?? 0;
   const prevSlots = prev ? (side.bids ? prev.book.bids : prev.book.asks) : null;
-  const slots = new Array<Slot>(DEPTH);
+  const cum = opts.quote ? side.cumQuote : side.cum;
   const decimals = opts.quote ? 0 : opts.szDecimals;
+  const slots = new Array<Slot>(DEPTH);
   for (let i = 0; i < DEPTH; i++) {
     if (i >= side.px.length) {
       slots[i] = EMPTY_SLOT;
@@ -127,13 +127,13 @@ function buildSlots(
     const prevSlot = prevSlots ? prevSlots[i] : EMPTY_SLOT;
     let flash = prevSlot.flash;
     let flashSeq = prevSlot.flashSeq;
-    if (prevSizes) {
-      const before = prevSizes.get(side.keys[i]);
+    if (prev) {
+      const before = prev.sizes[i0].get(side.keys[i]);
       let dir: Flash = "";
       if (before === undefined) {
         // Unknown price inside the range we already knew = a new level. Beyond it = depth we
         // only just learned about (e.g. the deep snapshot landing after the fast one), not news.
-        const inside = side.bids ? side.px[i] > prevEdge : side.px[i] < prevEdge;
+        const inside = side.bids ? side.px[i] > prev.edges[i0] : side.px[i] < prev.edges[i0];
         if (inside) dir = "up";
       } else if (size !== before) {
         dir = size > before ? "up" : "down";
@@ -143,12 +143,11 @@ function buildSlots(
         flashSeq = prevSlot.flashSeq + 1;
       }
     }
-    const mult = opts.quote ? side.px[i] : 1;
     slots[i] = {
       px: fmt(side.px[i], pxDecimals),
-      sz: fmt(size * mult, decimals),
-      total: fmt(side.cum[i] * mult, decimals),
-      ratio: side.cum[i] / max,
+      sz: fmt(opts.quote ? size * side.px[i] : size, decimals),
+      total: fmt(cum[i], decimals),
+      ratio: cum[i] / max,
       flash,
       flashSeq,
     };
@@ -184,8 +183,9 @@ export function mergeSnapshots(fast: WireL2Book | null, deep: WireL2Book | null)
 export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveOptions): Derived {
   const bids = parseSide(snap.levels[0], true);
   const asks = parseSide(snap.levels[1], false);
-  const bidDepth = bids.cum[bids.cum.length - 1] ?? 0;
-  const askDepth = asks.cum[asks.cum.length - 1] ?? 0;
+  const depthOf = (s: Side) => (opts.quote ? s.cumQuote : s.cum)[s.cum.length - 1] ?? 0;
+  const bidDepth = depthOf(bids);
+  const askDepth = depthOf(asks);
   const max = Math.max(bidDepth, askDepth) || 1;
   const pxDecimals = Math.max(bids.pxDecimals, asks.pxDecimals);
 
@@ -196,11 +196,11 @@ export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveO
   if (ref !== undefined) {
     const step = tickOf(ref, opts.nSigFigs, opts.szDecimals);
     tick = fmt(step, Math.max(pxDecimals, -Math.round(Math.log10(step))));
-  }
-  if (bids.px.length && asks.px.length) {
-    const abs = asks.px[0] - bids.px[0];
-    spread = fmt(abs, pxDecimals);
-    spreadPct = fmt((abs / ref!) * 100, 3) + "%";
+    if (bids.px.length && asks.px.length) {
+      const abs = asks.px[0] - bids.px[0];
+      spread = fmt(abs, pxDecimals);
+      spreadPct = fmt((abs / ref) * 100, 3) + "%";
+    }
   }
   const total = bidDepth + askDepth;
   const bidShare = total ? bidDepth / total : 0.5;
