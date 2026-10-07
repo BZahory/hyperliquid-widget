@@ -93,6 +93,9 @@ export function Select<T extends string | number | null>({
         aria-expanded={open}
         aria-controls={id}
         aria-activedescendant={open ? `${id}-${active}` : undefined}
+        // WebKit neither focuses a clicked button nor tabs to one without this, so onBlur would never close.
+        tabIndex={0}
+        disabled={options.length === 0}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={onKeyDown}
         className={`flex cursor-pointer items-center gap-1.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${

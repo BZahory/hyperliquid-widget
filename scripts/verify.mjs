@@ -143,7 +143,12 @@ check(
   `options [${labels.join(" · ")}]; tick ${tickBefore} → ${await visibleTick()}${offGrid.length ? `; off-grid: ${offGrid.join(" ")}` : ""}`,
 );
 
-await page.getByRole("combobox", { name: "Market" }).click();
+const market = page.getByRole("combobox", { name: "Market" });
+await market.click();
+await page.getByTestId("spread").click();
+check("outside click closes the menu", (await market.getAttribute("aria-expanded")) === "false");
+
+await market.click();
 await page.getByRole("option", { name: "ETH-USD" }).click();
 const rightAfter = await page.evaluate(() => ({
   levels: document.querySelectorAll('[data-testid="book"] .row[data-kind="level"]').length,

@@ -127,7 +127,7 @@ grouping and unit controls in the footer) and then adds what a trader actually r
 `pnpm verify` drives Chromium against live mainnet and checks: the book renders and visibly
 updates; flashes appear; memoized rows render only when their props change; digits are tabular and
 rows share one height; the precision dropdown regroups prices; switching symbol clears old rows
-synchronously and shows the new book; keyboard selection works; DevTools-style offline → status
+synchronously and shows the new book; menus close on outside click; keyboard selection works; DevTools-style offline → status
 `offline` → online → status `live` and data resumes without reload; zero console errors.
 
 ## Next steps
