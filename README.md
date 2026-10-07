@@ -91,8 +91,9 @@ grouping and unit controls above the book) and then adds what a trader actually 
   means more resting size than the asks.
 - **Spread row** with absolute and percentage spread.
 - **Change flashes** on the size cell: green when size at a level grew (or a new level appeared
-  inside the range already shown), red when it shrank. Depth that merely scrolls into view or is
-  learned from a deep snapshot does not flash. One-shot; a finished flash is never re-triggered by
+  inside the range already shown), red when it shrank. Only the rows the fast feed refreshes can
+  flash: deeper rows change in ~5 s batches from the deep snapshot, so they update silently, as does
+  depth that merely scrolls into view. One-shot; a finished flash is never re-triggered by
   unrelated renders.
 - Depth bars and totals follow the selected unit (base asset or USD notional).
 - **Sweep highlight** on hover: every level between the touch and the cursor lights up, i.e. what a

@@ -126,7 +126,7 @@ function parseSide(levels: WireLevel[], bids: boolean): Side {
   return { bids, keys, px, sz, cum, cumQuote, sizes, edge, pxDecimals };
 }
 
-function buildSlots(side: Side, prev: Derived | null, max: number, pxDecimals: number, opts: DeriveOptions): Slot[] {
+function buildSlots(side: Side, prev: Derived | null, max: number, pxDecimals: number, opts: DeriveOptions, live: number): Slot[] {
   const i0 = side.bids ? 0 : 1;
   const prevSlots = prev ? (side.bids ? prev.book.bids : prev.book.asks) : null;
   const cum = opts.quote ? side.cumQuote : side.cum;
@@ -143,7 +143,8 @@ function buildSlots(side: Side, prev: Derived | null, max: number, pxDecimals: n
     const prevSlot = prevSlots ? prevSlots[i] : EMPTY_SLOT;
     let flash = prevSlot.flash;
     let flashSeq = prevSlot.flashSeq;
-    if (prev) {
+    // Rows past the fast feed change only in ~5s batches when a deep snapshot lands: not news.
+    if (prev && i < live) {
       const before = prev.sizes[i0].get(side.keys[i]);
       let dir: Flash = "";
       if (before === undefined) {
@@ -188,8 +189,9 @@ export function mergeSnapshots(fast: WireL2Book | null, deep: WireL2Book | null)
 }
 
 /** One-pass derivation: parse, cumulative sums, a max shared by both sides, change detection against
- *  the previous frame, formatting. `prev = null` renders a clean baseline with no flashes. */
-export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveOptions): Derived {
+ *  the previous frame, formatting. `prev = null` renders a clean baseline with no flashes; only the
+ *  top `fastLen` rows per side (all rows when omitted) can flash. */
+export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveOptions, fastLen?: [bids: number, asks: number]): Derived {
   const bids = parseSide(snap.levels[0], true);
   const asks = parseSide(snap.levels[1], false);
   const depthOf = (s: Side) => (opts.quote ? s.cumQuote : s.cum)[s.cum.length - 1] ?? 0;
@@ -214,8 +216,8 @@ export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveO
   }
   return {
     book: {
-      asks: buildSlots(asks, prev, max, pxDecimals, opts),
-      bids: buildSlots(bids, prev, max, pxDecimals, opts),
+      asks: buildSlots(asks, prev, max, pxDecimals, opts, fastLen?.[1] ?? DEPTH),
+      bids: buildSlots(bids, prev, max, pxDecimals, opts, fastLen?.[0] ?? DEPTH),
       spread,
       spreadPct,
       tick,

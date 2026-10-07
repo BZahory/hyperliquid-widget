@@ -54,7 +54,8 @@ function commit() {
   const patch: Partial<BookState> = {};
   const snap = bookDirty ? mergeSnapshots(fast, deep) : null;
   if (snap) {
-    derived = deriveBook(snap, derived, { szDecimals, nSigFigs, quote });
+    const fastLen: [number, number] | undefined = fast ? [fast.levels[0].length, fast.levels[1].length] : undefined;
+    derived = deriveBook(snap, derived, { szDecimals, nSigFigs, quote }, fastLen);
     patch.book = derived.book;
     patch.loading = false;
   }

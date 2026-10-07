@@ -141,6 +141,13 @@ describe("deriveBook", () => {
     expect(gapFilled.book.bids[2]).toMatchObject({ px: "99.85", flash: "up", flashSeq: 1 });
   });
 
+  it("flashes only rows the fast feed covers; deeper rows keep their previous flash state", () => {
+    const a = derive(snap([["100.0", "1"], ["99.9", "1"], ["99.8", "1"]], [["100.1", "1"]]));
+    const b = deriveBook(snap([["100.0", "2"], ["99.9", "1"], ["99.8", "3"]], [["100.1", "1"]]), a, opts, [2, 1]);
+    expect(b.book.bids[0]).toMatchObject({ flash: "up", flashSeq: 1 });
+    expect(b.book.bids[2]).toMatchObject({ sz: "3.00000", flash: "", flashSeq: 0 });
+  });
+
   it("re-deriving the identical snapshot in quote mode keeps flash state and switches units", () => {
     const a = derive(snap([["100.0", "1"]], [["101.0", "1"]]));
     const changed = snap([["100.0", "2.4"]], [["101.0", "1"]]);
