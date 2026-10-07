@@ -23,7 +23,7 @@ wss://api.hyperliquid.xyz/ws
         ▼
 src/lib/socket.ts   module-level manager: registry keyed by subscription identity
         │           (l2Book: coin + nSigFigs + fast; trades: coin), routes by channel + coin,
-        │           drops data until the subscribe ACK, 30s ping + 45s watchdog, backoff+jitter
+        │           drops data until the subscribe ACK, 2s watchdog (10s stale, 30s ping), backoff+jitter
         │           reconnect, resubscribe-all on open, offline/online/visibility listeners
         ▼
 src/lib/store.ts    two latest-wins slots (fast top-5 feed, deep 20-level feed) + a capped
@@ -76,12 +76,12 @@ Where the perf-sensitive choices live:
   newest), then small incremental batches. Fields: `coin, side ("B" buy / "A" sell), px, sz, time,
   hash, tid, users`. The widget keeps the newest 25, flashing only fresh fills.
 - A silent connection is closed by the server after 60 s (measured: close code 1006 at 60.4 s), so
-  a `{"method":"ping"}` goes out every 30 s. The same timer force-drops the socket if no snapshot
-  arrived in 45 s — pongs deliberately don't count, because they prove the socket, not the
+  a `{"method":"ping"}` goes out every 30 s. A 2 s watchdog force-drops the socket if no snapshot
+  arrived in 10 s (live gaps peak at ~1.1 s fast, ~5.9 s deep), so a stalled socket shows "live"
+  for at most ~12 s — pongs deliberately don't count, because they prove the socket, not the
   subscription. "Live" is set when snapshots reach the book, not when the socket opens; backoff
   resets only once data flows; a handshake that hangs is abandoned after 10 s; the watchdog also
-  runs when the tab becomes visible, and `online` replaces the socket outright. Background tabs
-  throttle timers, so the ping is also sent from the message path when due. Any transition away
+  runs when the tab becomes visible, and `online` replaces the socket outright. Any transition away
   from live clears both buffers so a pre-disconnect deep snapshot is never merged with fresh data.
 
 ## Reading the book

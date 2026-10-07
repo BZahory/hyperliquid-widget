@@ -1,7 +1,7 @@
 import type { NSigFigs, WireL2Book, WireTrade } from "./types";
 
 /** Owns the single mainnet socket: subscription registry, backoff + jitter reconnect, resubscribe on
- *  open, ping/watchdog, and offline/online/visibility handling so "live" is never shown over a dead link. */
+ *  open, ping/watchdog, and offline/online/visibility handling. A dead link leaves "live" up ≤ ~12s. */
 export type Status = "connecting" | "live" | "reconnecting" | "offline";
 
 export type Sub =
@@ -18,8 +18,10 @@ export type Sub =
 const WS_URL = "wss://api.hyperliquid.xyz/ws";
 /** Server drops idle connections after 60s (measured); ping well inside that. */
 const PING_MS = 30_000;
-/** No snapshot for this long means the socket or the subscription is dead: drop and redo both. */
-const STALE_MS = 45_000;
+/** No snapshot for this long means the socket or the subscription is dead: drop and redo both.
+ *  Live gaps peak at ~1.1s (fast) and ~5.9s (deep). */
+const STALE_MS = 10_000;
+const TICK_MS = 2_000;
 /** A blackholed route can leave the handshake pending for minutes; don't wait for it. */
 const CONNECT_TIMEOUT_MS = 10_000;
 const MAX_BACKOFF_MS = 30_000;
@@ -117,9 +119,6 @@ function deliver(match: (sub: Sub) => boolean, data: unknown): boolean {
 
 function onMessage(ev: MessageEvent<string>) {
   const msg = JSON.parse(ev.data);
-  // Background tabs throttle timers past the server's idle cutoff; the message path is not
-  // throttled, so ping from here when due.
-  if (Date.now() - lastPingAt >= PING_MS) ping();
   if (msg.channel === "l2Book") {
     const data = msg.data as WireL2Book;
     const fast = data.fast === true;
@@ -164,12 +163,6 @@ function scheduleReconnect() {
   setStatus(navigator.onLine ? "reconnecting" : "offline");
 }
 
-function ping() {
-  if (ws?.readyState !== WebSocket.OPEN) return;
-  lastPingAt = Date.now();
-  ws.send(JSON.stringify({ method: "ping" }));
-}
-
 /** Keep the server's idle timer at bay, and drop a socket whose snapshots have stopped. */
 function tick() {
   if (Date.now() - lastDataAt > STALE_MS) {
@@ -178,7 +171,10 @@ function tick() {
     scheduleReconnect();
     return;
   }
-  ping();
+  if (ws?.readyState === WebSocket.OPEN && Date.now() - lastPingAt >= PING_MS) {
+    lastPingAt = Date.now();
+    ws.send(JSON.stringify({ method: "ping" }));
+  }
 }
 
 function connect() {
@@ -197,7 +193,7 @@ function connect() {
       send("subscribe", entry.sub);
       armAck(entry);
     }
-    pingTimer = setInterval(tick, PING_MS);
+    pingTimer = setInterval(tick, TICK_MS);
   };
   socket.onmessage = onMessage;
   socket.onclose = () => {
