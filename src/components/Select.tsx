@@ -16,9 +16,7 @@ interface SelectProps<T> {
   display?: string;
   /** Icon-only trigger; the selected label stays exposed to AT. */
   icon?: ReactNode;
-  direction?: "down" | "up";
   align?: "left" | "right";
-  className?: string;
 }
 
 /** WAI-ARIA select-only combobox: focus stays on the button, aria-activedescendant tracks the active
@@ -30,9 +28,7 @@ export function Select<T extends string | number | null>({
   onChange,
   display,
   icon,
-  direction = "down",
   align = "left",
-  className = "",
 }: SelectProps<T>) {
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -84,7 +80,7 @@ export function Select<T extends string | number | null>({
   };
 
   return (
-    <div className={`relative ${className}`} onBlur={onBlur}>
+    <div className="relative" onBlur={onBlur}>
       <button
         type="button"
         role="combobox"
@@ -110,7 +106,7 @@ export function Select<T extends string | number | null>({
             height="12"
             viewBox="0 0 12 12"
             aria-hidden="true"
-            className={`shrink-0 text-muted transition-transform ${(direction === "up") !== open ? "rotate-180" : ""}`}
+            className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`}
           >
             <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
@@ -121,9 +117,9 @@ export function Select<T extends string | number | null>({
           role="listbox"
           id={id}
           aria-label={label}
-          className={`absolute z-10 min-w-full overflow-hidden rounded-lg border border-line bg-[#17191c] py-1 text-sm shadow-xl ${
-            direction === "up" ? "bottom-full mb-2" : "top-full mt-2"
-          } ${align === "right" ? "right-0" : "left-0"}`}
+          className={`absolute top-full z-10 mt-2 min-w-full overflow-hidden rounded-lg border border-line bg-[#17191c] py-1 text-sm shadow-xl ${
+            align === "right" ? "right-0" : "left-0"
+          }`}
         >
           {options.map((o, i) => (
             <li

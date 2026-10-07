@@ -47,7 +47,7 @@ Where the perf-sensitive choices live:
 | All parsing/formatting happens once, outside components | `derive.ts`; components receive strings and 0..1 ratios (`types.ts`) |
 | Unchanged rows bail out | `Row.tsx` — `memo` with primitive props; `verify.mjs` counts Row fibers that rendered vs. whose props changed via the React DevTools commit hook |
 | Depth bars never trigger layout | `globals.css` `.bar` — `transform: scaleX()` with a 120 ms linear transition |
-| Zero layout shift | fixed 32 px rows, fixed grid columns, `font-variant-numeric: tabular-nums` (checked in `verify.mjs`) |
+| Zero layout shift | fixed 32 px rows (22 px below 900 px viewport height), fixed grid columns, `font-variant-numeric: tabular-nums` (checked in `verify.mjs`) |
 | Flashes restart without remounting | `Row.tsx` alternates `flash-up-a` / `flash-up-b` by `flashSeq` parity; state persists on the slot until the next change there |
 | Exactly one `useEffect` | `OrderBook.tsx` — boots the idempotent data layer; symbol/precision/unit changes are plain actions |
 
@@ -85,7 +85,7 @@ Where the perf-sensitive choices live:
 
 Matches the reference design (header card with the market, max leverage and a market menu;
 "Orders | Trades" tabs; asks above, pinned spread row, bids below, depth bars from the left;
-grouping and unit controls in the footer) and then adds what a trader actually reads from a book:
+grouping and unit controls above the book) and then adds what a trader actually reads from a book:
 
 - **Cumulative depth bars** scaled against one max shared by both sides, so a longer bid bar really
   means more resting size than the asks.
@@ -97,7 +97,7 @@ grouping and unit controls in the footer) and then adds what a trader actually r
 - Depth bars and totals follow the selected unit (base asset or USD notional).
 - **Sweep highlight** on hover: every level between the touch and the cursor lights up, i.e. what a
   market order of that depth would eat. Pure CSS (`:hover ~` for asks, `:has(~ :hover)` for bids).
-- **Grouping as price steps.** The footer shows the current step (e.g. `10`) and the dropdown lists
+- **Grouping as price steps.** The control above the book shows the current step (e.g. `10`) and the dropdown lists
   the `nSigFigs` options by the step each produces at the current price — `1,000 · 100 · 10 ·
   1 (full precision)` for BTC, `100 · 10 · 1 · 0.1 (full precision)` for ETH — derived from
   Hyperliquid's tick rules (≤5 significant figures, ≤ 6 − szDecimals decimals, integers always
@@ -118,7 +118,7 @@ grouping and unit controls in the footer) and then adds what a trader actually r
 - **Tailwind v4** for layout utilities; the row geometry, bars, flashes, skeleton and hover rules are
   plain CSS in `globals.css`, where they're easier to read as one unit.
 - **zustand (vanilla store)** — an external store the data layer can write to from a rAF callback,
-  consumed with `useStore` selectors so the header, book and footer each re-render only for the
+  consumed with `useStore` selectors so the header, book and controls each re-render only for the
   slice they read. No provider, no reducers.
 - Dev only: **vitest** (flush math), **Playwright** (real-browser verification), **knip** (dead code).
 

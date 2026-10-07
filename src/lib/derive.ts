@@ -68,7 +68,7 @@ function tickOf(price: number, nSigFigs: NSigFigs, szDecimals: number): number {
 const fmtTick = (tick: number) => fmt(tick, Math.max(0, -Math.round(Math.log10(tick))));
 
 /** Precision options labelled by price step, coarse → fine, ending with full precision. Reuses the
- *  previous array when unchanged so the footer only re-renders when the price crosses a power of ten. */
+ *  previous array when unchanged so the grouping control only re-renders when the price crosses a power of ten. */
 function groupingsAt(price: number, szDecimals: number, prev: Grouping[] | undefined): Grouping[] {
   const full = tickOf(price, null, szDecimals);
   const next: Grouping[] = [];

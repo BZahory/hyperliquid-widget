@@ -33,11 +33,10 @@ export function OrderBook() {
   return (
     <div className="flex w-full max-w-[440px] flex-col gap-4">
       <Header />
-      <h2 className="px-1 text-xl text-muted">Orders</h2>
       <section className="card">
         <Tabs />
+        <Controls />
         <Panel />
-        <Footer />
       </section>
     </div>
   );
@@ -145,7 +144,7 @@ function Panel() {
   );
 }
 
-function Footer() {
+function Controls() {
   const coin = useStore(store, (s) => s.coin);
   const tab = useStore(store, (s) => s.tab);
   const nSigFigs = useStore(store, (s) => s.nSigFigs);
@@ -153,7 +152,7 @@ function Footer() {
   const tick = useStore(store, (s) => s.book.tick);
   const groupings = useStore(store, (s) => s.book.groupings);
   return (
-    <div className="flex items-center justify-between px-5 py-3 text-sm">
+    <div className="flex items-center justify-between px-5 pt-3 text-sm">
       {tab === "orders" ? (
         <Select
           label="Price grouping"
@@ -161,8 +160,6 @@ function Footer() {
           options={groupings}
           onChange={setPrecision}
           display={tick || "—"}
-          direction="up"
-          className="text-muted"
         />
       ) : (
         <span />

@@ -43,6 +43,12 @@
     line-height: 1;
     isolation: isolate;
   }
+  /* Short viewports: keep both sides and the controls above the fold. */
+  @media (max-height: 900px) {
+    .row {
+      height: 22px;
+    }
+  }
   .row > span {
     position: relative;
     z-index: 2;
