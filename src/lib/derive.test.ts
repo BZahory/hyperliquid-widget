@@ -66,6 +66,31 @@ describe("deriveBook", () => {
     expect(derive(snap([["123456.0", "1"]], [["123457.0", "1"]])).book.tick).toBe("1"); // integers always allowed
   });
 
+  it("labels precision options by price step, cut off at full precision, and reuses the array when unchanged", () => {
+    const btc = derive(snap([["83452.0", "1"]], [["83453.0", "1"]]));
+    expect(btc.book.groupings).toEqual([
+      { value: 2, label: "1,000" },
+      { value: 3, label: "100" },
+      { value: 4, label: "10" },
+      { value: null, label: "1 (full precision)" },
+    ]);
+    const again = derive(snap([["83450.0", "1"]], [["83451.0", "1"]]), btc);
+    expect(again.book.groupings).toBe(btc.book.groupings);
+    const eth: DeriveOptions = { szDecimals: 4, nSigFigs: null, quote: false };
+    expect(derive(snap([["2568.1", "1"]], [["2568.2", "1"]]), null, eth).book.groupings.map((g) => g.label)).toEqual([
+      "100",
+      "10",
+      "1",
+      "0.1 (full precision)",
+    ]);
+    expect(derive(snap([["999.95", "1"]], [["999.96", "1"]]), null, eth).book.groupings.map((g) => g.label)).toEqual([
+      "10",
+      "1",
+      "0.1",
+      "0.01 (full precision)",
+    ]);
+  });
+
   it("formats a dot-less wire price", () => {
     expect(derive(snap([["83452", "1"]], [["83453", "1"]])).book.bids[0].px).toBe("83,452");
   });

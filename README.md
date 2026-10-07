@@ -90,9 +90,12 @@ bars from the left) and then adds what a trader actually reads from a book:
   meter all follow the selected unit (base asset or USD notional).
 - **Sweep highlight** on hover: every level between the touch and the cursor lights up, i.e. what a
   market order of that depth would eat. Pure CSS (`:hover ~` for asks, `:has(~ :hover)` for bids).
-- **Grouping shown as a price step** in the footer (e.g. `10`), derived from `nSigFigs`, the
-  current price magnitude and Hyperliquid's tick rules, with the `nSigFigs` options in the
-  dropdown. Sizes can be shown in USD or the base asset.
+- **Grouping as price steps.** The footer shows the current step (e.g. `10`) and the dropdown lists
+  the `nSigFigs` options by the step each produces at the current price — `1,000 · 100 · 10 ·
+  1 (full precision)` for BTC, `100 · 10 · 1 · 0.1 (full precision)` for ETH — derived from
+  Hyperliquid's tick rules (≤5 significant figures, ≤ 6 − szDecimals decimals, integers always
+  allowed). Options that would not be coarser than full precision are left out. Sizes can be
+  shown in USD or the base asset.
 - Loading skeleton on every switch, status pill (connecting / live / reconnecting / offline) that
   dims the book when it isn't live, keyboard-navigable dropdowns (WAI-ARIA select-only combobox).
 

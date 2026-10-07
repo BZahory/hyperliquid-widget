@@ -134,23 +134,22 @@ const rowHeights = await page.$$eval('[data-testid="book"] .row', (rows) =>
 );
 check("all book rows share one fixed height", rowHeights.length === 1, `${rowHeights.join(", ")}px`);
 
-// 4. Precision dropdown resubscribes and visibly regroups prices.
+// 4. Precision dropdown resubscribes and visibly regroups prices. Options are labelled by price
+// step (coarse → fine, ending with full precision); pick the coarsest and check every price sits
+// on that step.
 const visibleTick = () => page.getByRole("combobox", { name: "Price grouping" }).locator("span").first().textContent();
 const tickBefore = await visibleTick();
 await page.getByRole("combobox", { name: "Price grouping" }).click();
-await page.getByRole("option", { name: "3 significant figures" }).click();
+const labels = await page.getByRole("option").allTextContents();
+const coarseStep = Number(labels[0].replace(/,/g, ""));
+await page.getByRole("option").first().click();
 await waitForLevels();
 const grouped = await prices();
-// Every price must be a multiple of its own 3-significant-figure step (sides may straddle a power of ten).
-const onGrid = (p) => {
-  const step = 10 ** (Math.floor(Math.log10(p)) - 2);
-  return Math.abs(p / step - Math.round(p / step)) < 1e-9;
-};
-const offGrid = grouped.filter((p) => !onGrid(p));
+const offGrid = grouped.filter((p) => Math.abs(p / coarseStep - Math.round(p / coarseStep)) > 1e-9);
 check(
   "precision change regroups prices",
-  offGrid.length === 0,
-  `tick ${tickBefore} → ${await visibleTick()}${offGrid.length ? `; off-grid: ${offGrid.join(" ")}` : ""}`,
+  labels.length >= 2 && labels.at(-1).includes("(full precision)") && offGrid.length === 0,
+  `options [${labels.join(" · ")}]; tick ${tickBefore} → ${await visibleTick()}${offGrid.length ? `; off-grid: ${offGrid.join(" ")}` : ""}`,
 );
 
 // 5. Symbol switch shows no stale rows: skeleton at once, then a book in a different price regime.
@@ -165,24 +164,24 @@ await waitForLevels();
 const eth = await prices();
 check("ETH book renders after switch", eth.length >= 20 && Math.max(...eth) < Math.min(...initial) / 5, `ETH ≈ ${eth[0]} vs BTC ≈ ${initial[0]}`);
 
-// 6. Keyboard: the dropdowns work without a mouse.
+// 6. Keyboard: the dropdowns work without a mouse. End + Enter picks the last option, full precision.
 const grouping = page.getByRole("combobox", { name: "Price grouping" });
-const tickAt3 = Number((await visibleTick()).replace(/,/g, ""));
+const tickCoarse = Number((await visibleTick()).replace(/,/g, ""));
 await grouping.focus();
 await page.keyboard.press("ArrowDown"); // opens
-await page.keyboard.press("Home");
-await page.keyboard.press("Enter"); // "Full precision"
+await page.keyboard.press("End");
+await page.keyboard.press("Enter");
 await page.waitForFunction(
   () => {
     const el = document.querySelector('[role="combobox"][aria-label="Price grouping"]');
-    return el?.textContent.includes("Full precision") && el.getAttribute("aria-expanded") === "false";
+    return el?.textContent.includes("(full precision)") && el.getAttribute("aria-expanded") === "false";
   },
   null,
   { polling: 100, timeout: 10_000 },
 );
 await waitForLevels();
 const tickFull = Number((await visibleTick()).replace(/,/g, ""));
-check("keyboard selects full precision", tickFull < tickAt3, `grouping ${tickAt3} → ${tickFull}`);
+check("keyboard selects full precision", tickFull < tickCoarse, `grouping ${tickCoarse} → ${tickFull}`);
 
 // 7. Offline → status changes → online → data resumes without reload.
 await context.setOffline(true);

@@ -94,15 +94,20 @@ export function boot() {
   start();
 }
 
+/** Clear the book for a switch but keep the precision menu populated until the first snapshot relabels it. */
+function clearBook(): DisplayBook {
+  return { ...EMPTY_BOOK, groupings: store.getState().book.groupings };
+}
+
 export function setCoin(coin: Coin) {
   if (coin === store.getState().coin) return;
-  store.setState({ coin, loading: true, book: EMPTY_BOOK });
+  store.setState({ coin, loading: true, book: clearBook() });
   resubscribe();
 }
 
 export function setPrecision(nSigFigs: NSigFigs) {
   if (nSigFigs === store.getState().nSigFigs) return;
-  store.setState({ nSigFigs, loading: true, book: EMPTY_BOOK });
+  store.setState({ nSigFigs, loading: true, book: clearBook() });
   resubscribe();
 }
 

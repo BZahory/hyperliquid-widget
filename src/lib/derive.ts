@@ -1,4 +1,4 @@
-import type { DisplayBook, Flash, NSigFigs, Slot, WireL2Book, WireLevel } from "./types";
+import type { DisplayBook, Flash, Grouping, NSigFigs, Slot, WireL2Book, WireLevel } from "./types";
 
 /** Rows per side. Fixed so the DOM never changes shape. */
 export const DEPTH = 11;
@@ -28,6 +28,7 @@ export const EMPTY_BOOK: DisplayBook = {
   spread: "",
   spreadPct: "",
   tick: "",
+  groupings: [],
   bidShare: 0.5,
   bidPct: "",
   askPct: "",
@@ -63,6 +64,25 @@ function tickOf(price: number, nSigFigs: NSigFigs, szDecimals: number): number {
   const digits = Math.floor(Math.log10(price)) + 1;
   if (nSigFigs !== null) return 10 ** (digits - nSigFigs);
   return Math.max(Math.min(10 ** (digits - 5), 1), 10 ** (szDecimals - 6));
+}
+
+const fmtTick = (tick: number) => fmt(tick, Math.max(0, -Math.round(Math.log10(tick))));
+
+/**
+ * The precision menu, labelled by price step: every nSigFigs option coarser than full precision,
+ * then full precision itself. Reuses the previous array when nothing changed so the footer only
+ * re-renders when the price crosses a power of ten.
+ */
+function groupingsAt(price: number, szDecimals: number, prev: Grouping[] | undefined): Grouping[] {
+  const full = tickOf(price, null, szDecimals);
+  const next: Grouping[] = [];
+  for (const n of [2, 3, 4, 5] as const) {
+    const tick = tickOf(price, n, szDecimals);
+    if (tick > full) next.push({ value: n, label: fmtTick(tick) });
+  }
+  next.push({ value: null, label: `${fmtTick(full)} (full precision)` });
+  const same = prev?.length === next.length && next.every((g, i) => g.label === prev[i].label);
+  return same ? prev : next;
 }
 
 interface Side {
@@ -192,10 +212,11 @@ export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveO
   let spread = "";
   let spreadPct = "";
   let tick = "";
+  let groupings = prev?.book.groupings ?? [];
   const ref = bids.px.length && asks.px.length ? (bids.px[0] + asks.px[0]) / 2 : (bids.px[0] ?? asks.px[0]);
   if (ref !== undefined) {
-    const step = tickOf(ref, opts.nSigFigs, opts.szDecimals);
-    tick = fmt(step, Math.max(pxDecimals, -Math.round(Math.log10(step))));
+    tick = fmtTick(tickOf(ref, opts.nSigFigs, opts.szDecimals));
+    groupings = groupingsAt(ref, opts.szDecimals, prev?.book.groupings);
     if (bids.px.length && asks.px.length) {
       const abs = asks.px[0] - bids.px[0];
       spread = fmt(abs, pxDecimals);
@@ -212,6 +233,7 @@ export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveO
       spread,
       spreadPct,
       tick,
+      groupings,
       bidShare,
       bidPct: fmt(bidShare * 100, 0) + "%",
       askPct: fmt((1 - bidShare) * 100, 0) + "%",

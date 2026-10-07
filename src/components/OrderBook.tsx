@@ -4,21 +4,13 @@ import { useEffect, type KeyboardEvent } from "react";
 import { useStore } from "zustand";
 import { boot, setCoin, setPrecision, setQuote, store } from "@/lib/store";
 import type { Status } from "@/lib/socket";
-import type { Coin, NSigFigs } from "@/lib/types";
+import type { Coin } from "@/lib/types";
 import { Book } from "./Book";
 import { Select, type Option } from "./Select";
 
 const COIN_OPTIONS: readonly Option<Coin>[] = [
   { value: "BTC", label: "BTC-USD" },
   { value: "ETH", label: "ETH-USD" },
-];
-
-const PRECISION_OPTIONS: readonly Option<NSigFigs>[] = [
-  { value: null, label: "Full precision" },
-  { value: 5, label: "5 significant figures" },
-  { value: 4, label: "4 significant figures" },
-  { value: 3, label: "3 significant figures" },
-  { value: 2, label: "2 significant figures" },
 ];
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -110,12 +102,13 @@ function Footer() {
   const nSigFigs = useStore(store, (s) => s.nSigFigs);
   const quote = useStore(store, (s) => s.quote);
   const tick = useStore(store, (s) => s.book.tick);
+  const groupings = useStore(store, (s) => s.book.groupings);
   return (
     <div className="flex items-center justify-between border-t border-line px-4 py-2 text-sm">
       <Select
         label="Price grouping"
         value={nSigFigs}
-        options={PRECISION_OPTIONS}
+        options={groupings}
         onChange={setPrecision}
         display={tick || "—"}
         direction="up"

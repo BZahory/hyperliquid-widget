@@ -38,14 +38,22 @@ export interface Slot {
   flashSeq: number;
 }
 
+/** A precision option labelled by the price step it produces at the current price. */
+export interface Grouping {
+  value: NSigFigs;
+  label: string;
+}
+
 export interface DisplayBook {
   /** Exactly DEPTH slots each, index 0 = best price. Short sides are padded with empty slots. */
   asks: Slot[];
   bids: Slot[];
   spread: string;
   spreadPct: string;
-  /** Smallest gap between adjacent levels — the effective price grouping. */
+  /** Price step of the current grouping. */
   tick: string;
+  /** Coarse → fine, ending with full precision; options no coarser than full precision are left out. */
+  groupings: Grouping[];
   /** Share of displayed depth sitting on the bid side, 0..1. */
   bidShare: number;
   bidPct: string;
