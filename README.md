@@ -10,7 +10,7 @@ zustand, nothing else at runtime.
 pnpm install && pnpm dev     # http://localhost:3000
 ```
 
-Other commands: `pnpm test` (vitest, pure flush math) · `pnpm verify` (Playwright against a running
+Other commands: `pnpm test` (vitest: derive math, the store merge, socket lifecycle against a fake WebSocket) · `pnpm verify` (Playwright against a running
 dev server, or `URL=https://… pnpm verify` against a deployment; once: `pnpm exec playwright install
 chromium`) · `pnpm probe` (re-check the live API assumptions below) · `pnpm knip` · `pnpm lint` ·
 `pnpm typecheck` · `pnpm build`.
@@ -129,7 +129,7 @@ grouping and unit controls above the book) and then adds what a trader actually 
 - **zustand (vanilla store)** — an external store the data layer can write to from a rAF callback,
   consumed with `useStore` selectors so the header, book and controls each re-render only for the
   slice they read. No provider, no reducers.
-- Dev only: **vitest** (flush math), **Playwright** (real-browser verification), **knip** (dead code).
+- Dev only: **vitest** (unit tests), **Playwright** (real-browser verification), **knip** (dead code).
 
 ## Verification
 
@@ -145,5 +145,3 @@ synchronously and shows the new book; menus close on outside click; keyboard sel
 - Fetch `szDecimals` and max leverage from the `meta` endpoint to support any coin instead of a
   two-entry table. On mainnet today BTC and ETH perps exist only on the main dex; the HIP-3 dex
   listings (hyna, cash, flx) are delisted, so the market menu lists the two main-dex markets.
-- Test the socket manager against a scripted mock server (reconnect, ACK gate, watchdog); today
-  those paths are exercised only by the Playwright offline/online cycle.
