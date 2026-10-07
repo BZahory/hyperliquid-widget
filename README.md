@@ -1,6 +1,6 @@
 # Hyperliquid Order Book
 
-**Live demo:** __LIVE_URL__
+**Live demo:** https://hyperliquid-widget.vercel.app · code: https://github.com/BZahory/hyperliquid-widget
 
 A live BTC / ETH perpetuals order book driven by Hyperliquid's mainnet `l2Book` WebSocket
 feed. Next.js (App Router) + React + TypeScript + Tailwind + zustand, nothing else at runtime.
