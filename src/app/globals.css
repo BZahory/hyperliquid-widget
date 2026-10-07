@@ -1,26 +1,145 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --color-page: #1b1d20;
+  --color-card: #0f1113;
+  --color-line: #24272b;
+  --color-ink: #ececec;
+  --color-muted: #8b8f96;
+  --color-accent: #f7931a;
+  --color-bid: #1fa67d;
+  --color-ask: #ed7088;
+  --color-warn: #f5a623;
 }
 
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    color-scheme: dark;
+  }
+  body {
+    background: var(--color-page);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  .card {
+    background: var(--color-card);
+    border-radius: 12px;
+  }
+
+  /* ---- Book rows: fixed geometry, nothing here may change size with the data. ---- */
+  .row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1.15fr 1fr 1fr;
+    align-items: center;
+    height: 28px;
+    padding: 0 16px;
+    font-size: 13px;
+    line-height: 1;
+    isolation: isolate;
+  }
+  .row > span {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    height: 100%;
+    white-space: nowrap;
+  }
+  .row > .total {
+    justify-content: flex-end;
+  }
+  .row > .sz {
+    height: auto;
+    padding: 3px 6px;
+    margin-left: -6px;
+    border-radius: 3px;
+  }
+
+  /* Cumulative depth. scaleX only: compositor-driven, never layout. */
+  .bar {
+    position: absolute;
+    inset: 1px 0;
+    transform-origin: left;
+    transition: transform 120ms linear;
+    will-change: transform;
+  }
+  .ask .bar {
+    background: color-mix(in srgb, var(--color-ask) 22%, transparent);
+  }
+  .bid .bar {
+    background: color-mix(in srgb, var(--color-bid) 24%, transparent);
+  }
+
+  /* Hover: highlight every level between the touch and the cursor, i.e. what a market
+     order of that depth would sweep. Asks render worst→best so the range is the following
+     siblings; bids render best→worst so it is the preceding ones (via :has). */
+  .row::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
+  .asks .row:hover ~ .row::after,
+  .bids .row:has(~ .row:hover)::after {
+    background: rgba(255, 255, 255, 0.045);
+  }
+  .row:hover::after {
+    background: rgba(255, 255, 255, 0.09);
+  }
+
+  /* One-shot change feedback on the size cell. Two identical keyframe sets per direction:
+     alternating the animation *name* restarts it on consecutive changes without remounting. */
+  .flash-up-a > .sz { animation: flash-up-a 420ms ease-out; }
+  .flash-up-b > .sz { animation: flash-up-b 420ms ease-out; }
+  .flash-down-a > .sz { animation: flash-down-a 420ms ease-out; }
+  .flash-down-b > .sz { animation: flash-down-b 420ms ease-out; }
+
+  /* Loading skeleton: shimmering placeholders in the fixed cells. */
+  .row[data-kind="skeleton"] > .sz {
+    height: 100%;
+    padding-block: 0;
+  }
+  .row[data-kind="skeleton"] > span::after {
+    content: "";
+    display: block;
+    width: 55%;
+    height: 10px;
+    border-radius: 3px;
+    background: #24272b;
+    animation: shimmer 1.2s ease-in-out infinite;
+  }
+
+  .stale {
+    opacity: 0.55;
+    filter: saturate(0.5);
+  }
+  .book {
+    transition: opacity 300ms, filter 300ms;
+  }
+}
+
+@keyframes flash-up-a {
+  from { background-color: color-mix(in srgb, var(--color-bid) 40%, transparent); color: #fff; }
+}
+@keyframes flash-up-b {
+  from { background-color: color-mix(in srgb, var(--color-bid) 40%, transparent); color: #fff; }
+}
+@keyframes flash-down-a {
+  from { background-color: color-mix(in srgb, var(--color-ask) 40%, transparent); color: #fff; }
+}
+@keyframes flash-down-b {
+  from { background-color: color-mix(in srgb, var(--color-ask) 40%, transparent); color: #fff; }
+}
+@keyframes shimmer {
+  50% { opacity: 0.4; }
+}
+@keyframes pulse-dot {
+  50% { opacity: 0.35; }
 }

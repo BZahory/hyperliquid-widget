@@ -1,0 +1,133 @@
+import { describe, expect, it } from "vitest";
+import { DEPTH, deriveBook, EMPTY_BOOK, mergeSnapshots, type Derived } from "./derive";
+import type { WireL2Book, WireLevel } from "./types";
+
+const level = (px: string, sz: string): WireLevel => ({ px, sz, n: 1 });
+const snap = (bids: [string, string][], asks: [string, string][]): WireL2Book => ({
+  coin: "BTC",
+  time: 0,
+  levels: [bids.map(([px, sz]) => level(px, sz)), asks.map(([px, sz]) => level(px, sz))],
+});
+const opts = { szDecimals: 5, quote: false };
+const derive = (s: WireL2Book, prev: Derived | null = null, o = opts) => deriveBook(s, prev, o);
+
+describe("deriveBook", () => {
+  it("pads every side to DEPTH slots and keeps EMPTY_BOOK the same shape", () => {
+    const { book } = derive(snap([["100.0", "1"]], [["101.0", "1"], ["102.0", "1"]]));
+    expect(book.bids).toHaveLength(DEPTH);
+    expect(book.asks).toHaveLength(DEPTH);
+    expect(book.bids[1]).toEqual({ px: "", sz: "", total: "", ratio: 0, flash: "", flashSeq: 0 });
+    expect(book.asks[2].px).toBe("");
+    expect(EMPTY_BOOK.asks).toHaveLength(DEPTH);
+  });
+
+  it("accumulates per side and scales both sides by one shared max", () => {
+    const { book } = derive(snap([["100.0", "1"], ["99.0", "2"], ["98.0", "3"]], [["101.0", "1"], ["102.0", "1"]]));
+    expect(book.bids.slice(0, 3).map((s) => s.total)).toEqual(["1.00000", "3.00000", "6.00000"]);
+    expect(book.asks.slice(0, 2).map((s) => s.total)).toEqual(["1.00000", "2.00000"]);
+    expect(book.bids.slice(0, 3).map((s) => s.ratio)).toEqual([1 / 6, 3 / 6, 1]);
+    expect(book.asks.slice(0, 2).map((s) => s.ratio)).toEqual([1 / 6, 2 / 6]);
+    expect(book.bidShare).toBe(0.75);
+    expect(book.bidPct).toBe("75%");
+    expect(book.askPct).toBe("25%");
+  });
+
+  it("only uses the displayed depth for cumulative totals", () => {
+    const bids: [string, string][] = Array.from({ length: 20 }, (_, i) => [`${100 - i}.0`, "1"]);
+    const { book } = derive(snap(bids, [["101.0", "1"]]));
+    expect(book.bids[DEPTH - 1].total).toBe(`${DEPTH}.00000`);
+    expect(book.bids[DEPTH - 1].ratio).toBe(1);
+  });
+
+  it("formats prices with thousands separators and the snapshot's shared decimals", () => {
+    const btc = derive(snap([["83452.0", "1"]], [["83453.0", "1"]])).book;
+    expect(btc.bids[0].px).toBe("83,452");
+    const eth = derive(snap([["2568.0", "1"]], [["2568.1", "1"]])).book;
+    expect(eth.bids[0].px).toBe("2,568.0"); // padded to match the 1-decimal neighbour
+    expect(eth.asks[0].px).toBe("2,568.1");
+  });
+
+  it("reports spread, spread %, and tick from the gap between levels", () => {
+    const { book } = derive(snap([["83450.0", "1"], ["83440.0", "1"]], [["83460.0", "1"], ["83470.0", "1"]]));
+    expect(book.spread).toBe("10");
+    expect(book.spreadPct).toBe("0.012%");
+    expect(book.tick).toBe("10");
+    const eth = derive(snap([["2568.1", "1"], ["2568.0", "1"]], [["2568.2", "1"]])).book;
+    expect(eth.spread).toBe("0.1");
+    expect(eth.tick).toBe("0.1");
+  });
+
+  it("leaves spread blank when a side is empty", () => {
+    const { book } = derive(snap([], [["101.0", "1"]]));
+    expect(book.spread).toBe("");
+    expect(book.spreadPct).toBe("");
+    expect(book.bidShare).toBe(0);
+  });
+
+  it("does not flash on the first snapshot", () => {
+    const { book } = derive(snap([["100.0", "1"]], [["101.0", "1"]]));
+    expect(book.bids[0].flash).toBe("");
+    expect(book.bids[0].flashSeq).toBe(0);
+  });
+
+  it("flashes up/down on size change, persists until the next change, and alternates parity", () => {
+    const a = derive(snap([["100.0", "1"]], [["101.0", "1"]]));
+    const b = derive(snap([["100.0", "2"]], [["101.0", "1"]]), a);
+    expect(b.book.bids[0]).toMatchObject({ flash: "up", flashSeq: 1 });
+    expect(b.book.asks[0]).toMatchObject({ flash: "", flashSeq: 0 });
+    const c = derive(snap([["100.0", "1.5"]], [["101.0", "1"]]), b);
+    expect(c.book.bids[0]).toMatchObject({ flash: "down", flashSeq: 2 });
+    const d = derive(snap([["100.0", "1.5"]], [["101.0", "1"]]), c);
+    expect(d.book.bids[0]).toMatchObject({ flash: "down", flashSeq: 2 }); // unchanged: no retrigger
+    const e = derive(snap([["100.0", "1.6"]], [["101.0", "1"]]), d);
+    expect(e.book.bids[0]).toMatchObject({ flash: "up", flashSeq: 3 });
+  });
+
+  it("treats a brand-new price level as an increase", () => {
+    const a = derive(snap([["100.0", "1"]], [["101.0", "1"]]));
+    const b = derive(snap([["100.5", "1"], ["100.0", "1"]], [["101.0", "1"]]), a);
+    expect(b.book.bids[0]).toMatchObject({ px: "100.5", flash: "up", flashSeq: 1 });
+    expect(b.book.bids[1].flash).toBe(""); // same price, same size, shifted a slot: no flash
+  });
+
+  it("does not mistake a level scrolling in from beyond DEPTH for a new one", () => {
+    const bids: [string, string][] = Array.from({ length: 15 }, (_, i) => [`${100 - i}.0`, "1"]);
+    const a = derive(snap(bids, [["101.0", "1"]]));
+    const b = derive(snap(bids.slice(1), [["101.0", "1"]]), a);
+    expect(b.book.bids[DEPTH - 1].px).toBe(`${100 - DEPTH}`);
+    expect(b.book.bids[DEPTH - 1].flash).toBe("");
+  });
+
+  it("re-deriving the same snapshot with new display options keeps flash state and changes units", () => {
+    const a = derive(snap([["100.0", "1"]], [["101.0", "1"]]));
+    const b = derive(snap([["100.0", "2"]], [["101.0", "1"]]), a);
+    const c = derive(snap([["100.0", "2"]], [["101.0", "1"]]), b, { szDecimals: 5, quote: true });
+    expect(c.book.bids[0]).toMatchObject({ sz: "200", total: "200", flash: "up", flashSeq: 1 });
+    expect(c.book.asks[0].sz).toBe("101");
+  });
+});
+
+describe("mergeSnapshots", () => {
+  const fast = snap([["100.0", "1"], ["99.9", "1"]], [["100.1", "1"], ["100.2", "1"]]);
+  const deep = snap(
+    [["100.1", "9"], ["100.0", "9"], ["99.9", "9"], ["99.8", "9"], ["99.7", "9"]],
+    [["100.0", "9"], ["100.1", "9"], ["100.2", "9"], ["100.3", "9"], ["100.4", "9"]],
+  );
+
+  it("returns whichever snapshot exists when the other is missing", () => {
+    expect(mergeSnapshots(fast, null)).toBe(fast);
+    expect(mergeSnapshots(null, deep)).toBe(deep);
+    expect(mergeSnapshots(null, null)).toBeNull();
+  });
+
+  it("keeps fast levels verbatim and appends only deep levels beyond them", () => {
+    const merged = mergeSnapshots(fast, deep)!;
+    expect(merged.levels[0].map((l) => `${l.px}@${l.sz}`)).toEqual(["100.0@1", "99.9@1", "99.8@9", "99.7@9"]);
+    expect(merged.levels[1].map((l) => `${l.px}@${l.sz}`)).toEqual(["100.1@1", "100.2@1", "100.3@9", "100.4@9"]);
+  });
+
+  it("falls back to the whole deep side when the fast side is empty", () => {
+    const merged = mergeSnapshots(snap([], [["100.1", "1"]]), deep)!;
+    expect(merged.levels[0]).toHaveLength(5);
+  });
+});
