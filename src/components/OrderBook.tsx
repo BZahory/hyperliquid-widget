@@ -151,6 +151,7 @@ function Controls() {
   const quote = useStore(store, (s) => s.quote);
   const tick = useStore(store, (s) => s.book.tick);
   const groupings = useStore(store, (s) => s.book.groupings);
+  const live = useStore(store, (s) => s.status === "live");
   return (
     <div className="flex items-center justify-between px-5 pt-3 text-sm">
       {tab === "orders" ? (
@@ -164,13 +165,14 @@ function Controls() {
       ) : (
         <span />
       )}
-      <UnitRadios coin={coin} quote={quote} />
+      <UnitRadios coin={coin} quote={quote} disabled={!live} />
     </div>
   );
 }
 
-/** Size unit as a radio group: one tab stop, arrows move the choice. */
-function UnitRadios({ coin, quote }: { coin: Coin; quote: boolean }) {
+/** Size unit as a radio group: one tab stop, arrows move the choice. Disabled while not live: the
+ *  buffers are cleared then, so there is nothing to re-derive in the other unit. */
+function UnitRadios({ coin, quote, disabled }: { coin: Coin; quote: boolean; disabled: boolean }) {
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
     e.preventDefault();
@@ -183,8 +185,9 @@ function UnitRadios({ coin, quote }: { coin: Coin; quote: boolean }) {
       role="radio"
       aria-checked={active}
       tabIndex={active ? 0 : -1}
+      disabled={disabled}
       onClick={() => setQuote(value)}
-      className={`cursor-pointer rounded px-1 outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
+      className={`cursor-pointer rounded px-1 outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:cursor-default disabled:opacity-50 ${
         active ? "font-medium text-ink" : "text-muted hover:text-ink"
       }`}
     >
