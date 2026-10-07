@@ -20,7 +20,7 @@ interface SelectProps<T> {
 }
 
 /** WAI-ARIA select-only combobox: focus stays on the button, aria-activedescendant tracks the active
- *  option, arrows/Home/End move, Enter/Space pick, Escape or blur closes. No effects needed. */
+ *  option, arrows/Home/End move, Enter/Space/Tab pick, Escape or blur closes. No effects needed. */
 export function Select<T extends string | number | null>({
   label,
   value,
@@ -70,6 +70,9 @@ export function Select<T extends string | number | null>({
       case "Escape":
         setOpen(false);
         break;
+      case "Tab":
+        if (open) choose(active); // APG select-only combobox: Tab commits, then focus moves on
+        return;
       default:
         return;
     }
@@ -98,7 +101,7 @@ export function Select<T extends string | number | null>({
           icon ? "p-1.5 text-muted hover:bg-white/6 hover:text-ink" : "hover:text-white"
         }`}
       >
-        {icon ?? <span>{display ?? options[selected]?.label}</span>}
+        {icon ?? <span aria-hidden={display !== undefined || undefined}>{display ?? options[selected]?.label}</span>}
         {(icon || display !== undefined) && <span className="sr-only">{options[selected]?.label}</span>}
         {!icon && (
           <svg
