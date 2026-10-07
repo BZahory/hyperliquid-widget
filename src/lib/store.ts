@@ -39,6 +39,9 @@ export const store = createStore<BookState>(() => ({
 // React never renders more than once per frame.
 let fast: WireL2Book | null = null;
 let deep: WireL2Book | null = null;
+/** Last merged book. Between deep snapshots each fast frame merges onto this, not onto `deep`, so a
+ *  level leaving the fast window keeps its last fast size instead of reverting to an older deep one. */
+let merged: WireL2Book | null = null;
 let bookDirty = false;
 let derived: Derived | null = null;
 let recent: WireTrade[] = [];
@@ -52,7 +55,7 @@ function commit() {
   const { coin, nSigFigs, quote, trades } = store.getState();
   const { szDecimals } = MARKETS[coin];
   const patch: Partial<BookState> = {};
-  const snap = bookDirty ? mergeSnapshots(fast, deep) : null;
+  const snap = bookDirty ? (merged = mergeSnapshots(fast, merged ?? deep)) : null;
   if (snap) {
     const fastLen: [number, number] | undefined = fast ? [fast.levels[0].length, fast.levels[1].length] : undefined;
     derived = deriveBook(snap, derived, { szDecimals, nSigFigs, quote }, fastLen);
@@ -79,7 +82,7 @@ function schedule() {
 /** Swap the book subscriptions to the current (coin, nSigFigs); what arrives next is a clean baseline. */
 function resubscribeBook() {
   stopBook?.();
-  fast = deep = derived = null;
+  fast = deep = merged = derived = null;
   bookDirty = false;
   const { coin, nSigFigs } = store.getState();
   const stopFast = subscribe({ type: "l2Book", coin, nSigFigs, fast: true }, (d) => {
@@ -89,6 +92,7 @@ function resubscribeBook() {
   });
   const stopDeep = subscribe({ type: "l2Book", coin, nSigFigs, fast: false }, (d) => {
     deep = d;
+    merged = null;
     bookDirty = true;
     schedule();
   });
@@ -121,7 +125,7 @@ export function boot() {
     // Never merge snapshots from before and after a disconnect (the deep buffer could be minutes old
     // after sleep). The last book stays on screen, dimmed, until new data arrives.
     if (status !== "live") {
-      fast = deep = derived = null;
+      fast = deep = merged = derived = null;
       recent = [];
       fresh = 0;
     }

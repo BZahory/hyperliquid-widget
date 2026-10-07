@@ -61,7 +61,8 @@ Where the perf-sensitive choices live:
 - **Two cadences.** The default subscription sends 20 levels per side but only every ~5 s. Adding
   `fast: true` (accepted and echoed by the server) sends ~2 snapshots per second but only the top
   5 levels per side. The widget subscribes to both and merges them: the fast top-5 verbatim, then
-  the deep snapshot's levels strictly beyond them. The top of the book is always fresh; deeper rows
+  the levels strictly beyond them from the previous merge (reset to the deep snapshot whenever one
+  lands), so a level leaving the fast window keeps its last fast size instead of reverting. The top of the book is always fresh; deeper rows
   refresh every few seconds. After a sharp move the deep tail can briefly show a price gap until
   the next deep snapshot fills it in.
 - **Stragglers.** `l2Book` messages do not echo `nSigFigs`; after a precision change on the same
