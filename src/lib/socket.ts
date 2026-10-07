@@ -1,16 +1,16 @@
-import type { WireL2Book } from "./types";
+import type { NSigFigs, WireL2Book } from "./types";
 
 /**
  * Module-level WebSocket manager. Owns the single mainnet socket, a subscription registry
- * keyed by (coin, nSigFigs), reconnect with exponential backoff + jitter, resubscribe on every
- * open, a ping that doubles as a liveness watchdog, and an `offline` listener so the status
- * indicator can never say "live" over a dead connection.
+ * keyed by (coin, nSigFigs, fast), reconnect with exponential backoff + jitter, resubscribe on
+ * every open, a ping that doubles as a liveness watchdog, and offline/online/visibility
+ * listeners so the status indicator can never say "live" over a dead connection.
  */
 export type Status = "connecting" | "live" | "reconnecting" | "offline";
 
 export interface L2BookSub {
   coin: string;
-  nSigFigs: number | null;
+  nSigFigs: NSigFigs;
   /**
    * The feed has two cadences (verified live): `fast: true` pushes the top 5 levels per side
    * ~2×/s; the default pushes 20 levels per side but only every ~5s. The store merges both.
@@ -19,10 +19,12 @@ export interface L2BookSub {
 }
 
 const WS_URL = "wss://api.hyperliquid.xyz/ws";
-/** Server drops idle connections after 60s; ping well inside that. */
+/** Server drops idle connections after 60s (measured); ping well inside that. */
 const PING_MS = 30_000;
-/** Nothing at all (not even a pong) for this long means the socket is half-open: drop it. */
+/** No snapshot for this long means the socket or the subscription is dead: drop and redo both. */
 const STALE_MS = 45_000;
+/** A blackholed route can leave the handshake pending for minutes; don't wait for it. */
+const CONNECT_TIMEOUT_MS = 10_000;
 const MAX_BACKOFF_MS = 30_000;
 /** If the subscribe ACK never shows up, start accepting data anyway rather than freeze. */
 const ACK_TIMEOUT_MS = 2_000;
@@ -45,8 +47,9 @@ const statusListeners = new Set<(s: Status) => void>();
 let status: Status = "connecting";
 let ws: WebSocket | null = null;
 let attempt = 0;
-let lastMessageAt = 0;
+let lastDataAt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let connectTimer: ReturnType<typeof setTimeout> | undefined;
 let pingTimer: ReturnType<typeof setInterval> | undefined;
 let started = false;
 
@@ -80,7 +83,7 @@ function armAck(entry: Entry) {
   }, ACK_TIMEOUT_MS);
 }
 
-/** Register interest; returns an unsubscribe. Re-subscribing an existing key swaps the listener. */
+/** Register interest; returns an unsubscribe. Re-subscribing a live key swaps the listener. */
 export function subscribe(sub: L2BookSub, onData: Entry["onData"]): () => void {
   const key = keyOf(sub);
   const existing = registry.get(key);
@@ -102,10 +105,13 @@ export function subscribe(sub: L2BookSub, onData: Entry["onData"]): () => void {
 }
 
 function onMessage(ev: MessageEvent<string>) {
-  lastMessageAt = Date.now();
-  attempt = 0;
   const msg = JSON.parse(ev.data);
   if (msg.channel === "l2Book") {
+    // "Live" means snapshots are arriving, not merely that the socket opened. Backoff resets
+    // here too, so a server that accepts and immediately drops us cannot cause a tight loop.
+    lastDataAt = Date.now();
+    attempt = 0;
+    setStatus("live");
     const data = msg.data as WireL2Book;
     // Route by (coin, cadence): a message for a switched-away coin finds no entry and drops here.
     const fast = data.fast === true;
@@ -122,12 +128,13 @@ function onMessage(ev: MessageEvent<string>) {
       clearTimeout(entry.ackTimer);
     }
   }
-  // "pong" and "error" need no handling: any message feeds the watchdog, and the only error
-  // seen in practice ("Already subscribed") still ends in data flowing.
+  // "pong" and "error" need no handling. Pongs deliberately don't feed the watchdog: they prove
+  // the socket, not the subscription, and a silent subscription must not read as "live".
 }
 
 function dropSocket() {
   clearInterval(pingTimer);
+  clearTimeout(connectTimer);
   const socket = ws;
   ws = null;
   if (!socket) return;
@@ -143,14 +150,15 @@ function scheduleReconnect() {
   setStatus(navigator.onLine ? "reconnecting" : "offline");
 }
 
+/** Keep the server's idle timer at bay, and drop a socket whose snapshots have stopped. */
 function tick() {
-  if (Date.now() - lastMessageAt > STALE_MS) {
+  if (Date.now() - lastDataAt > STALE_MS) {
     // Half-open socket (typically after laptop sleep): close() alone may hang on the handshake.
     dropSocket();
     scheduleReconnect();
     return;
   }
-  ws?.send(JSON.stringify({ method: "ping" }));
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ method: "ping" }));
 }
 
 function connect() {
@@ -158,9 +166,13 @@ function connect() {
   if (ws) return;
   const socket = new WebSocket(WS_URL);
   ws = socket;
+  connectTimer = setTimeout(() => {
+    dropSocket();
+    scheduleReconnect();
+  }, CONNECT_TIMEOUT_MS);
   socket.onopen = () => {
-    lastMessageAt = Date.now();
-    setStatus("live");
+    clearTimeout(connectTimer);
+    lastDataAt = Date.now(); // grace period until the first snapshot
     for (const entry of registry.values()) {
       send("subscribe", entry.sub);
       armAck(entry);
@@ -179,14 +191,21 @@ export function start() {
   if (started) return;
   started = true;
   window.addEventListener("offline", () => {
-    // Drop immediately so the indicator never lies, but keep retrying on the backoff schedule:
+    // Drop at once so the indicator never lies, but keep retrying on the backoff schedule:
     // navigator.onLine is a hint, not a guarantee, and "online" may never fire.
     dropSocket();
     scheduleReconnect();
   });
   window.addEventListener("online", () => {
+    // Whatever socket exists was built on the old network; replace it now, not after backoff.
+    dropSocket();
     attempt = 0;
+    setStatus("reconnecting");
     connect();
+  });
+  document.addEventListener("visibilitychange", () => {
+    // Background tabs throttle timers; run the watchdog the moment the tab is visible again.
+    if (document.visibilityState === "visible" && ws) tick();
   });
   connect();
 }

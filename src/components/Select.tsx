@@ -12,7 +12,7 @@ interface SelectProps<T> {
   value: T;
   options: readonly Option<T>[];
   onChange: (value: T) => void;
-  /** Text for the closed control; defaults to the selected option's label. */
+  /** Visible text for the closed control instead of the selected label (which stays available to AT). */
   display?: string;
   /** Which way the list opens. */
   direction?: "down" | "up";
@@ -58,9 +58,11 @@ export function Select<T extends string | number | null>({
         else show();
         break;
       case "Home":
+        setOpen(true);
         setActive(0);
         break;
       case "End":
+        setOpen(true);
         setActive(last);
         break;
       case "Enter":
@@ -95,6 +97,7 @@ export function Select<T extends string | number | null>({
         className="flex cursor-pointer items-center gap-1.5 rounded-md outline-none hover:text-white focus-visible:ring-2 focus-visible:ring-accent/70"
       >
         <span>{display ?? options[selected]?.label}</span>
+        {display !== undefined && <span className="sr-only">{options[selected]?.label}</span>}
         <svg
           width="12"
           height="12"

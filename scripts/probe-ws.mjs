@@ -20,6 +20,7 @@ const payload = (method, nSigFigs, fast) => {
 const step = (d) => Math.abs(Number(d.levels[1][0].px) - Number(d.levels[1][1].px));
 
 let cur = null;
+let prev = null;
 let acked = null;
 let count = 0;
 let beforeAck = 0;
@@ -38,6 +39,7 @@ ws.onopen = () => {
     const next = order[i++ % order.length];
     ws.send(payload("unsubscribe", cur, true));
     ws.send(payload("subscribe", next, true));
+    prev = cur;
     cur = next;
     if (i === 10) {
       clearInterval(flip);
@@ -61,14 +63,18 @@ ws.onmessage = (ev) => {
       log("first snapshot keys:", Object.keys(msg.data), "bids:", bids.length, "asks:", asks.length);
       log("bid0:", JSON.stringify(bids[0]), "ask0:", JSON.stringify(asks[0]));
     }
-    const expected = cur === null ? 1 : 10 ** (5 - cur);
-    const stale = step(msg.data) !== expected;
+    // A snapshot is at the old grouping if its top-of-book step is not a multiple of the new
+    // step (old was finer) or is at least the old step (old was coarser). Thin tops can still
+    // produce false positives, so treat the counts as an upper bound.
+    const stepOf = (n) => (n === null ? 1 : 10 ** (5 - n));
+    const s = step(msg.data);
+    const stale = prev !== null && (s % stepOf(cur) !== 0 || (stepOf(prev) > stepOf(cur) && s >= stepOf(prev)));
     if (stale && acked !== cur) beforeAck++;
     if (stale && acked === cur) afterAck++;
     return;
   }
   if (msg.channel === "subscriptionResponse") {
-    if (msg.data.method === "subscribe") acked = msg.data.subscription.nSigFigs;
+    if (msg.data.method === "subscribe") acked = msg.data.subscription.nSigFigs ?? null;
     if (count === 0) log("subscriptionResponse:", JSON.stringify(msg.data));
     return;
   }

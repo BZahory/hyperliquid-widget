@@ -101,7 +101,7 @@ function ColumnHeaders() {
   const quote = useStore(store, (s) => s.quote);
   const unit = quote ? "USD" : coin;
   return (
-    <div className="row !h-7 text-xs text-muted">
+    <div className="row h-7 text-xs text-muted">
       <span>Price</span>
       <span>Size ({unit})</span>
       <span className="total">Total ({unit})</span>
@@ -125,7 +125,7 @@ function Footer() {
         direction="up"
         className="text-muted"
       />
-      <div className="flex gap-3 text-sm" role="group" aria-label="Size unit">
+      <div className="flex gap-3 text-sm" role="radiogroup" aria-label="Size unit">
         <UnitButton active={quote} onClick={() => setQuote(true)}>
           USD
         </UnitButton>
@@ -141,7 +141,8 @@ function UnitButton({ active, onClick, children }: { active: boolean; onClick: (
   return (
     <button
       type="button"
-      aria-pressed={active}
+      role="radio"
+      aria-checked={active}
       onClick={onClick}
       className={`cursor-pointer rounded px-1 outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
         active ? "font-medium text-ink" : "text-muted hover:text-ink"

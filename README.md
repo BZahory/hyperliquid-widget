@@ -64,9 +64,13 @@ Where the perf-sensitive choices live:
   rounds showed they arrive only *before* the new subscription's ACK, never after. Each registry
   entry therefore drops data until its ACK (with a 2 s fail-open so a lost ACK can't freeze the
   book). Switching coins needs no gate: routing is by coin, so late messages find no entry.
-- Idle connections are closed after 60 s: a `{"method":"ping"}` goes out every 30 s. The same timer
-  force-drops the socket if nothing at all (not even a `pong`) arrived in 45 s, which is what a
-  half-open socket after laptop sleep looks like.
+- A silent connection is closed by the server after 60 s (measured: close code 1006 at 60.4 s), so
+  a `{"method":"ping"}` goes out every 30 s. The same timer force-drops the socket if no snapshot
+  arrived in 45 s — pongs deliberately don't count, because they prove the socket, not the
+  subscription. "Live" is set when snapshots arrive, not when the socket opens, backoff resets
+  only once data flows, a handshake that hangs is abandoned after 10 s, and the watchdog also runs
+  the moment the tab becomes visible or the browser reports `online`. Any transition away from
+  live clears both buffers so a pre-disconnect deep snapshot is never merged with fresh data.
 
 ## Reading the book
 
@@ -76,13 +80,16 @@ bars from the left) and then adds what a trader actually reads from a book:
 - **Cumulative depth bars** scaled against one max shared by both sides, so a longer bid bar really
   means more resting size than the asks.
 - **Spread row** with absolute and percentage spread.
-- **Change flashes** on the size cell: green when size at a level grew (or a new level appeared),
-  red when it shrank. One-shot; a finished flash is never re-triggered by unrelated renders.
+- **Change flashes** on the size cell: green when size at a level grew (or a new level appeared
+  inside the range already shown), red when it shrank. Depth that merely scrolls into view or is
+  learned from a deep snapshot does not flash. One-shot; a finished flash is never re-triggered by
+  unrelated renders.
 - **Imbalance meter** under the book: share of displayed depth on each side.
 - **Sweep highlight** on hover: every level between the touch and the cursor lights up, i.e. what a
   market order of that depth would eat. Pure CSS (`:hover ~` for asks, `:has(~ :hover)` for bids).
-- **Grouping shown as a price step** in the footer (e.g. `10`), computed from the live snapshot,
-  with the `nSigFigs` options in the dropdown. Sizes can be shown in USD or the base asset.
+- **Grouping shown as a price step** in the footer (e.g. `10`), derived from `nSigFigs`, the
+  current price magnitude and Hyperliquid's tick rules, with the `nSigFigs` options in the
+  dropdown. Sizes can be shown in USD or the base asset.
 - Loading skeleton on every switch, status pill (connecting / live / reconnecting / offline) that
   dims the book when it isn't live, keyboard-navigable dropdowns (WAI-ARIA select-only combobox).
 

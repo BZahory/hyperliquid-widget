@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEPTH, deriveBook, EMPTY_BOOK, mergeSnapshots, type Derived } from "./derive";
+import { DEPTH, deriveBook, EMPTY_BOOK, mergeSnapshots, type Derived, type DeriveOptions } from "./derive";
 import type { WireL2Book, WireLevel } from "./types";
 
 const level = (px: string, sz: string): WireLevel => ({ px, sz, n: 1 });
@@ -8,7 +8,7 @@ const snap = (bids: [string, string][], asks: [string, string][]): WireL2Book =>
   time: 0,
   levels: [bids.map(([px, sz]) => level(px, sz)), asks.map(([px, sz]) => level(px, sz))],
 });
-const opts = { szDecimals: 5, quote: false };
+const opts: DeriveOptions = { szDecimals: 5, nSigFigs: null, quote: false };
 const derive = (s: WireL2Book, prev: Derived | null = null, o = opts) => deriveBook(s, prev, o);
 
 describe("deriveBook", () => {
@@ -47,14 +47,27 @@ describe("deriveBook", () => {
     expect(eth.asks[0].px).toBe("2,568.1");
   });
 
-  it("reports spread, spread %, and tick from the gap between levels", () => {
+  it("reports spread and spread %", () => {
     const { book } = derive(snap([["83450.0", "1"], ["83440.0", "1"]], [["83460.0", "1"], ["83470.0", "1"]]));
     expect(book.spread).toBe("10");
     expect(book.spreadPct).toBe("0.012%");
-    expect(book.tick).toBe("10");
-    const eth = derive(snap([["2568.1", "1"], ["2568.0", "1"]], [["2568.2", "1"]])).book;
+    const eth = derive(snap([["2568.1", "1"]], [["2568.2", "1"]])).book;
     expect(eth.spread).toBe("0.1");
-    expect(eth.tick).toBe("0.1");
+  });
+
+  it("derives the grouping tick from nSigFigs and price magnitude, not from level gaps", () => {
+    const thin = snap([["83450.0", "1"], ["83447.0", "1"]], [["83453.0", "1"]]); // gaps of 3
+    expect(derive(thin).book.tick).toBe("1");
+    expect(derive(thin, null, { ...opts, nSigFigs: 4 }).book.tick).toBe("10");
+    expect(derive(thin, null, { ...opts, nSigFigs: 2 }).book.tick).toBe("1,000");
+    const eth: DeriveOptions = { szDecimals: 4, nSigFigs: null, quote: false };
+    expect(derive(snap([["2568.0", "1"]], [["2568.0", "1"]]), null, eth).book.tick).toBe("0.1");
+    expect(derive(snap([["2568.0", "1"]], [["2568.0", "1"]]), null, { ...eth, nSigFigs: 3 }).book.tick).toBe("10");
+    expect(derive(snap([["123456.0", "1"]], [["123457.0", "1"]])).book.tick).toBe("1"); // integers always allowed
+  });
+
+  it("formats a dot-less wire price", () => {
+    expect(derive(snap([["83452", "1"]], [["83453", "1"]])).book.bids[0].px).toBe("83,452");
   });
 
   it("leaves spread blank when a side is empty", () => {
@@ -98,12 +111,21 @@ describe("deriveBook", () => {
     expect(b.book.bids[DEPTH - 1].flash).toBe("");
   });
 
+  it("does not flash depth it only just learned about beyond the previous deepest level", () => {
+    const fastOnly = derive(snap([["100.0", "1"], ["99.9", "1"]], [["100.1", "1"]]));
+    const withDeep = derive(snap([["100.0", "1"], ["99.9", "1"], ["99.8", "5"], ["99.7", "5"]], [["100.1", "1"]]), fastOnly);
+    expect(withDeep.book.bids.slice(0, 4).map((s) => s.flash)).toEqual(["", "", "", ""]);
+    // ...but a price appearing inside the known range is new and flashes.
+    const gapFilled = derive(snap([["100.0", "1"], ["99.9", "1"], ["99.85", "2"], ["99.8", "5"]], [["100.1", "1"]]), withDeep);
+    expect(gapFilled.book.bids[2]).toMatchObject({ px: "99.85", flash: "up", flashSeq: 1 });
+  });
+
   it("re-deriving the same snapshot with new display options keeps flash state and changes units", () => {
     const a = derive(snap([["100.0", "1"]], [["101.0", "1"]]));
     const b = derive(snap([["100.0", "2"]], [["101.0", "1"]]), a);
-    const c = derive(snap([["100.0", "2"]], [["101.0", "1"]]), b, { szDecimals: 5, quote: true });
-    expect(c.book.bids[0]).toMatchObject({ sz: "200", total: "200", flash: "up", flashSeq: 1 });
-    expect(c.book.asks[0].sz).toBe("101");
+    const c = derive(snap([["100.0", "2.4"]], [["101.0", "1"]]), b, { ...opts, quote: true });
+    expect(c.book.bids[0]).toMatchObject({ sz: "240", total: "240", flash: "up", flashSeq: 2 });
+    expect(c.book.asks[0].sz).toBe("101"); // 1 × 101.0, rounded to whole USD
   });
 });
 

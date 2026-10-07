@@ -62,11 +62,12 @@ page.on("pageerror", (e) => consoleErrors.push(String(e)));
 const status = () => page.getAttribute('[data-testid="status"]', "data-status");
 const waitForStatus = (s, timeout = 20_000) =>
   page.waitForSelector(`[data-testid="status"][data-status="${s}"]`, { timeout });
+/** Resolve once both cadences have landed: the fast top-5 alone would give only 10 level rows. */
 const waitForLevels = () =>
   page.waitForFunction(
     () =>
       !document.querySelector('[data-testid="book"]')?.hasAttribute("data-loading") &&
-      document.querySelectorAll('[data-testid="bids"] .row[data-kind="level"]').length > 0,
+      document.querySelectorAll('[data-testid="book"] .row[data-kind="level"]').length >= 20,
     null,
     { timeout: 20_000 },
   );
@@ -125,20 +126,28 @@ const tabular = await page.evaluate(() => {
   return Math.abs(probe("11111") - probe("00000")) < 0.01;
 });
 check("tabular numerals (1s and 0s same width)", tabular);
-const rowHeights = await page.$$eval(".row", (rows) => new Set(rows.map((r) => r.getBoundingClientRect().height)).size);
-check("all rows share one fixed height", rowHeights <= 2, `${rowHeights} distinct heights incl. column header`);
+const rowHeights = await page.$$eval('[data-testid="book"] .row', (rows) =>
+  [...new Set(rows.map((r) => r.getBoundingClientRect().height))],
+);
+check("all book rows share one fixed height", rowHeights.length === 1, `${rowHeights.join(", ")}px`);
 
 // 4. Precision dropdown resubscribes and visibly regroups prices.
-const tickBefore = await page.getByRole("combobox", { name: "Price grouping" }).textContent();
+const visibleTick = () => page.getByRole("combobox", { name: "Price grouping" }).locator("span").first().textContent();
+const tickBefore = await visibleTick();
 await page.getByRole("combobox", { name: "Price grouping" }).click();
 await page.getByRole("option", { name: "3 significant figures" }).click();
 await waitForLevels();
 const grouped = await prices();
-const magnitude = 10 ** (Math.floor(Math.log10(grouped[0])) - 2);
+// Every price must be a multiple of its own 3-significant-figure step (sides may straddle a power of ten).
+const onGrid = (p) => {
+  const step = 10 ** (Math.floor(Math.log10(p)) - 2);
+  return Math.abs(p / step - Math.round(p / step)) < 1e-9;
+};
+const offGrid = grouped.filter((p) => !onGrid(p));
 check(
   "precision change regroups prices",
-  grouped.every((p) => Math.abs(p / magnitude - Math.round(p / magnitude)) < 1e-9),
-  `tick ${tickBefore.trim()} → ${(await page.getByRole("combobox", { name: "Price grouping" }).textContent()).trim()}`,
+  offGrid.length === 0,
+  `tick ${tickBefore} → ${await visibleTick()}${offGrid.length ? `; off-grid: ${offGrid.join(" ")}` : ""}`,
 );
 
 // 5. Symbol switch shows no stale rows.
@@ -151,14 +160,19 @@ const eth = await prices();
 check("ETH book renders after switch", eth.length >= 10 && eth.every((p) => p < 10_000), `best ask region ≈ ${eth[eth.length - 1]}`);
 
 // 6. Keyboard: the dropdowns work without a mouse.
-await page.getByRole("combobox", { name: "Price grouping" }).focus();
+const grouping = page.getByRole("combobox", { name: "Price grouping" });
+await grouping.focus();
 await page.keyboard.press("ArrowDown"); // opens
 await page.keyboard.press("Home");
 await page.keyboard.press("Enter"); // "Full precision"
+await page.waitForFunction(
+  (el) => el.textContent.includes("Full precision") && el.getAttribute("aria-expanded") === "false",
+  await grouping.elementHandle(),
+);
 await waitForLevels();
 const fine = await prices();
 const gaps = fine.slice(1).map((p, i) => Math.abs(p - fine[i])).filter((g) => g > 0);
-check("keyboard selects full precision", Math.min(...gaps) <= 1, `min gap ${Math.min(...gaps)}`);
+check("keyboard selects full precision", Math.min(...gaps) < 1, `selected label updated; min gap ${Math.min(...gaps).toFixed(2)}`);
 
 // 7. Offline → status changes → online → data resumes without reload.
 await context.setOffline(true);

@@ -1,10 +1,11 @@
-import type { DisplayBook, Flash, Slot, WireL2Book, WireLevel } from "./types";
+import type { DisplayBook, Flash, NSigFigs, Slot, WireL2Book, WireLevel } from "./types";
 
 /** Rows per side. Fixed so the DOM never changes shape. */
 export const DEPTH = 11;
 
 export interface DeriveOptions {
   szDecimals: number;
+  nSigFigs: NSigFigs;
   /** Show size/total in quote currency (USD) instead of base. */
   quote: boolean;
 }
@@ -15,6 +16,8 @@ type Sizes = ReadonlyMap<string, number>;
 export interface Derived {
   book: DisplayBook;
   sizes: [bids: Sizes, asks: Sizes];
+  /** Deepest price known per side last frame; levels beyond it are learned, not new. */
+  edges: [bid: number, ask: number];
 }
 
 const EMPTY_SLOT: Slot = { px: "", sz: "", total: "", ratio: 0, flash: "", flashSeq: 0 };
@@ -50,19 +53,31 @@ function fracDigits(px: string): number {
   return end - dot - 1;
 }
 
+/**
+ * Price step of the current grouping. Hyperliquid perp prices carry at most 5 significant
+ * figures and at most (6 - szDecimals) decimals, integers always allowed; `nSigFigs` groups to
+ * that many figures of the current magnitude. Deterministic, unlike the gap between levels,
+ * which widens whenever the top of a book thins out.
+ */
+function tickOf(price: number, nSigFigs: NSigFigs, szDecimals: number): number {
+  const digits = Math.floor(Math.log10(price)) + 1;
+  if (nSigFigs !== null) return 10 ** (digits - nSigFigs);
+  return Math.max(Math.min(10 ** (digits - 5), 1), 10 ** (szDecimals - 6));
+}
+
 interface Side {
+  bids: boolean;
   /** Wire price strings of the displayed levels — canonical within one grouping, used as change-detection keys. */
   keys: string[];
   px: number[];
   sz: number[];
   cum: number[];
   sizes: Map<string, number>;
+  edge: number;
   pxDecimals: number;
-  /** Smallest gap between adjacent displayed levels, or Infinity. */
-  minGap: number;
 }
 
-function parseSide(levels: WireLevel[]): Side {
+function parseSide(levels: WireLevel[], bids: boolean): Side {
   const n = Math.min(levels.length, DEPTH);
   const keys = new Array<string>(n);
   const px = new Array<number>(n);
@@ -71,7 +86,6 @@ function parseSide(levels: WireLevel[]): Side {
   const sizes = new Map<string, number>();
   let acc = 0;
   let pxDecimals = 0;
-  let minGap = Infinity;
   for (let i = 0; i < levels.length; i++) {
     const level = levels[i];
     const size = Number(level.sz);
@@ -84,19 +98,22 @@ function parseSide(levels: WireLevel[]): Side {
     acc += size;
     cum[i] = acc;
     pxDecimals = Math.max(pxDecimals, fracDigits(level.px));
-    if (i > 0) minGap = Math.min(minGap, Math.abs(px[i] - px[i - 1]));
   }
-  return { keys, px, sz, cum, sizes, pxDecimals, minGap };
+  const edge = levels.length ? Number(levels[levels.length - 1].px) : bids ? -Infinity : Infinity;
+  return { bids, keys, px, sz, cum, sizes, edge, pxDecimals };
 }
 
 function buildSlots(
   side: Side,
-  prevSizes: Sizes | null,
-  prevSlots: readonly Slot[] | null,
+  prev: Derived | null,
   max: number,
   pxDecimals: number,
   opts: DeriveOptions,
 ): Slot[] {
+  const i0 = side.bids ? 0 : 1;
+  const prevSizes = prev?.sizes[i0];
+  const prevEdge = prev?.edges[i0] ?? 0;
+  const prevSlots = prev ? (side.bids ? prev.book.bids : prev.book.asks) : null;
   const slots = new Array<Slot>(DEPTH);
   const decimals = opts.quote ? 0 : opts.szDecimals;
   for (let i = 0; i < DEPTH; i++) {
@@ -107,15 +124,23 @@ function buildSlots(
     const size = side.sz[i];
     // Flash state belongs to the slot and persists until the next change there, so a finished
     // animation is never re-triggered by unrelated frames or by rows shifting position.
-    const prev = prevSlots ? prevSlots[i] : EMPTY_SLOT;
-    let flash = prev.flash;
-    let flashSeq = prev.flashSeq;
+    const prevSlot = prevSlots ? prevSlots[i] : EMPTY_SLOT;
+    let flash = prevSlot.flash;
+    let flashSeq = prevSlot.flashSeq;
     if (prevSizes) {
       const before = prevSizes.get(side.keys[i]);
-      const dir: Flash = before === undefined || size > before ? "up" : size < before ? "down" : "";
+      let dir: Flash = "";
+      if (before === undefined) {
+        // Unknown price inside the range we already knew = a new level. Beyond it = depth we
+        // only just learned about (e.g. the deep snapshot landing after the fast one), not news.
+        const inside = side.bids ? side.px[i] > prevEdge : side.px[i] < prevEdge;
+        if (inside) dir = "up";
+      } else if (size !== before) {
+        dir = size > before ? "up" : "down";
+      }
       if (dir) {
         flash = dir;
-        flashSeq = prev.flashSeq + 1;
+        flashSeq = prevSlot.flashSeq + 1;
       }
     }
     const mult = opts.quote ? side.px[i] : 1;
@@ -157,8 +182,8 @@ export function mergeSnapshots(fast: WireL2Book | null, deep: WireL2Book | null)
  * first snapshot renders as a clean baseline with no flashes.
  */
 export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveOptions): Derived {
-  const bids = parseSide(snap.levels[0]);
-  const asks = parseSide(snap.levels[1]);
+  const bids = parseSide(snap.levels[0], true);
+  const asks = parseSide(snap.levels[1], false);
   const bidDepth = bids.cum[bids.cum.length - 1] ?? 0;
   const askDepth = asks.cum[asks.cum.length - 1] ?? 0;
   const max = Math.max(bidDepth, askDepth) || 1;
@@ -166,26 +191,32 @@ export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveO
 
   let spread = "";
   let spreadPct = "";
+  let tick = "";
+  const ref = bids.px.length && asks.px.length ? (bids.px[0] + asks.px[0]) / 2 : (bids.px[0] ?? asks.px[0]);
+  if (ref !== undefined) {
+    const step = tickOf(ref, opts.nSigFigs, opts.szDecimals);
+    tick = fmt(step, Math.max(pxDecimals, -Math.round(Math.log10(step))));
+  }
   if (bids.px.length && asks.px.length) {
     const abs = asks.px[0] - bids.px[0];
     spread = fmt(abs, pxDecimals);
-    spreadPct = fmt((abs / ((asks.px[0] + bids.px[0]) / 2)) * 100, 3) + "%";
+    spreadPct = fmt((abs / ref!) * 100, 3) + "%";
   }
-  const gap = Math.min(bids.minGap, asks.minGap);
   const total = bidDepth + askDepth;
   const bidShare = total ? bidDepth / total : 0.5;
 
   return {
     book: {
-      asks: buildSlots(asks, prev?.sizes[1] ?? null, prev?.book.asks ?? null, max, pxDecimals, opts),
-      bids: buildSlots(bids, prev?.sizes[0] ?? null, prev?.book.bids ?? null, max, pxDecimals, opts),
+      asks: buildSlots(asks, prev, max, pxDecimals, opts),
+      bids: buildSlots(bids, prev, max, pxDecimals, opts),
       spread,
       spreadPct,
-      tick: Number.isFinite(gap) ? fmt(gap, pxDecimals) : "",
+      tick,
       bidShare,
       bidPct: fmt(bidShare * 100, 0) + "%",
       askPct: fmt((1 - bidShare) * 100, 0) + "%",
     },
     sizes: [bids.sizes, asks.sizes],
+    edges: [bids.edge, asks.edge],
   };
 }

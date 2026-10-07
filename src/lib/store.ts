@@ -39,8 +39,8 @@ let teardown: (() => void) | null = null;
 function commit() {
   const snap = mergeSnapshots(fast, deep);
   if (!snap) return;
-  const { coin, quote } = store.getState();
-  derived = deriveBook(snap, derived, { szDecimals: COINS[coin].szDecimals, quote });
+  const { coin, nSigFigs, quote } = store.getState();
+  derived = deriveBook(snap, derived, { szDecimals: COINS[coin].szDecimals, nSigFigs, quote });
   store.setState({ book: derived.book, loading: false });
 }
 
@@ -53,10 +53,15 @@ function schedule() {
   if (!raf) raf = requestAnimationFrame(flush);
 }
 
+/** Forget buffered snapshots and flash history; whatever arrives next renders as a clean baseline. */
+function reset() {
+  fast = deep = derived = null;
+}
+
 /** Swap both live subscriptions to the current (coin, nSigFigs) and forget everything from the old ones. */
 function resubscribe() {
   teardown?.();
-  fast = deep = derived = null;
+  reset();
   const { coin, nSigFigs } = store.getState();
   const stopFast = subscribe({ coin, nSigFigs, fast: true }, (d) => {
     fast = d;
@@ -78,7 +83,13 @@ let booted = false;
 export function boot() {
   if (booted) return;
   booted = true;
-  onStatus((status) => store.setState({ status }));
+  onStatus((status) => {
+    // Never merge a snapshot from before a disconnect with one from after it: after sleep the
+    // deep buffer could be minutes old while the fast one is fresh. The last book stays on
+    // screen (dimmed) until new data replaces it.
+    if (status !== "live") reset();
+    store.setState({ status });
+  });
   resubscribe();
   start();
 }
@@ -95,8 +106,9 @@ export function setPrecision(nSigFigs: NSigFigs) {
   resubscribe();
 }
 
-/** Display-only change: re-derive the last snapshot immediately instead of waiting for data. */
+/** Display-only change: re-derive the buffered snapshots on the next frame instead of waiting for data. */
 export function setQuote(quote: boolean) {
+  if (quote === store.getState().quote) return;
   store.setState({ quote });
-  commit();
+  schedule();
 }
