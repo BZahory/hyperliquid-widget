@@ -166,8 +166,12 @@ await page.keyboard.press("ArrowDown"); // opens
 await page.keyboard.press("Home");
 await page.keyboard.press("Enter"); // "Full precision"
 await page.waitForFunction(
-  (el) => el.textContent.includes("Full precision") && el.getAttribute("aria-expanded") === "false",
-  await grouping.elementHandle(),
+  () => {
+    const el = document.querySelector('[role="combobox"][aria-label="Price grouping"]');
+    return el?.textContent.includes("Full precision") && el.getAttribute("aria-expanded") === "false";
+  },
+  null,
+  { polling: 100, timeout: 10_000 },
 );
 await waitForLevels();
 const fine = await prices();
