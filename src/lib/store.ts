@@ -49,6 +49,8 @@ let fresh = 0;
 let rederive = false;
 /** The trades list's first row in view after its last scroll, until the next commit. */
 let scrolled: number | null = null;
+/** Trade rows that fit the view: fewer than TRADES where fill rows are taller (touch screens). */
+let inView = TRADES;
 /** A trades row has focus: fills move the view as if scrolled, so it stays in the DOM. */
 let held = false;
 let raf = 0;
@@ -115,7 +117,7 @@ function commit() {
       ? deriveTrades(recent, count - 1, opts)
       : deriveTrades(recent.slice(0, fresh), count - 1, opts).concat(trades).slice(0, HISTORY));
     // Scrolled down or holding focus, the view moves with prepended fills so the rows being read stay put.
-    if (top || held) top = Math.min(top + fresh, Math.max(0, list.length - TRADES));
+    if (top || held) top = Math.min(top + fresh, Math.max(0, list.length - inView));
   }
   if (top !== tradesTop) patch.tradesTop = top;
   bookDirty = rederive = false;
@@ -244,8 +246,9 @@ export function setQuote(quote: boolean) {
 }
 
 /** Applied in the next frame's commit, so scrolling while fills arrive still renders once per frame. */
-export function scrollTrades(top: number) {
+export function scrollTrades(top: number, view = TRADES) {
   scrolled = top;
+  inView = view;
   schedule();
 }
 

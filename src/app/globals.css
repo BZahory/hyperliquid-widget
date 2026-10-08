@@ -87,6 +87,7 @@
 
   /* The book's height; fills are placed by transform, so a new one shifts rows without layout. */
   .trades {
+    --fill: var(--row);
     height: calc(var(--row) * 25);
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -96,7 +97,16 @@
   .fill {
     position: absolute;
     inset: 0 0 auto;
-    transform: translateY(calc(var(--row) * (var(--head) - var(--seq))));
+    transform: translateY(calc(var(--fill) * (var(--head) - var(--seq))));
+  }
+  .trades .row {
+    height: var(--fill);
+  }
+  /* Touch screens: taller fill rows; the list scrolls, so it keeps the book's height. */
+  @media (pointer: coarse) {
+    .trades {
+      --fill: max(var(--row), 28px);
+    }
   }
   /* Marks a fill that links to the explorer. */
   a.row:focus-visible > .total::before {

@@ -28,8 +28,8 @@ export function Trades() {
 
   const attach = useCallback((el: HTMLDivElement) => {
     scroller.current = el;
-    const measure = () => (row.current = el.clientHeight / TRADES);
-    const sync = () => scrollTrades(Math.floor(el.scrollTop / row.current));
+    const measure = () => (row.current = el.querySelector(".row")?.getBoundingClientRect().height || el.clientHeight / TRADES);
+    const sync = () => scrollTrades(Math.floor(el.scrollTop / row.current), Math.floor(el.clientHeight / row.current));
     measure();
     const resize = new ResizeObserver(() => {
       measure();
@@ -79,7 +79,7 @@ export function Trades() {
         className="trades outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/70"
       >
         {trades.length ? (
-          <div className="relative" style={{ height: `calc(var(--row) * ${trades.length})`, "--head": trades[0].seq } as CSSProperties}>
+          <div className="relative" style={{ height: `calc(var(--fill) * ${trades.length})`, "--head": trades[0].seq } as CSSProperties}>
             {trades.slice(start, top + TRADES + OVERSCAN).map((t) => (
               <TradeRow key={t.id} {...t} />
             ))}
