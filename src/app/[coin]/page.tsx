@@ -20,7 +20,7 @@ export const generateMetadata = async (props: Props): Promise<Metadata> => ({ ti
 
 export default async function Page(props: Props) {
   return (
-    <main className="flex min-h-screen items-start justify-center px-4 py-3 sm:items-center">
+    <main className="flex min-h-svh items-start justify-center px-4 py-3 sm:items-center">
       <OrderBook coin={await coinOf(props)} />
     </main>
   );
