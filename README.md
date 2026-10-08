@@ -24,7 +24,7 @@ wss://api.hyperliquid.xyz/ws
 src/lib/socket.ts   module-level manager: registry keyed by subscription identity
         │           (l2Book: coin + nSigFigs + fast; trades: coin), routes by channel + coin,
         │           drops data until the subscribe ACK, 2s watchdog (10s stale, 30s ping), backoff+jitter
-        │           reconnect, resubscribe-all on open, offline/online/visibility listeners
+        │           reconnect (≤10s), resubscribe-all on open, offline/online/visibility listeners
         ▼
 src/lib/store.ts    two latest-wins slots (fast top-5 feed, deep 20-level feed) + a capped
         │           newest-first trade list ──► ONE requestAnimationFrame ──► commit()
@@ -73,8 +73,9 @@ Where the perf-sensitive choices live:
 - **Stragglers.** `l2Book` messages do not echo `nSigFigs`; after a precision change on the same
   coin, snapshots at the old grouping can still arrive. Flipping precision every 900 ms for 10
   rounds showed they arrive only *before* the new subscription's ACK, never after. Each registry
-  entry therefore drops data until its ACK (with a 2 s fail-open so a lost ACK can't freeze the
-  book). Switching coins needs no gate: routing is by coin, so late messages find no entry. Known
+  entry therefore drops data until its ACK, with a 5 s fail-open so a lost ACK can't freeze the
+  book: well above a slow link's round trip, and inside the 10 s watchdog, so it never forces a
+  reconnect. Switching coins needs no gate: routing is by coin, so late messages find no entry. Known
   gap: re-selecting a grouping whose earlier ACK is still in flight (three switches inside one
   round trip) lets that ACK open the gate early, so a frame or two of the middle grouping can show.
 - The `trades` subscription sends a batch of the 30 most recent fills on subscribe (oldest →
@@ -84,10 +85,12 @@ Where the perf-sensitive choices live:
   a `{"method":"ping"}` goes out every 30 s. A 2 s watchdog force-drops the socket if no snapshot
   arrived in 10 s (live gaps peak at ~1.1 s fast, ~5.9 s deep), so a stalled socket shows "live"
   for at most ~12 s — pongs deliberately don't count, because they prove the socket, not the
-  subscription. "Live" is set when snapshots reach the book, not when the socket opens; backoff
-  resets only once data flows; a handshake that hangs is abandoned after 10 s; the watchdog also
-  runs when the tab becomes visible, and `online` replaces the socket outright. Any transition away
-  from live clears both buffers so a pre-disconnect deep snapshot is never merged with fresh data.
+  subscription. "Live" is set when snapshots reach the book, not when the socket opens; the backoff
+  (≤ 10 s) resets only after 10 s of steady data, so a server that drops right after a snapshot
+  backs off instead of looping; a handshake that hangs is abandoned after 10 s; a tab becoming
+  visible runs the watchdog or retries a pending reconnect at once, and `online` replaces the
+  socket outright. Any transition away from live clears both buffers so a pre-disconnect deep
+  snapshot is never merged with fresh data.
 
 ## Reading the book
 

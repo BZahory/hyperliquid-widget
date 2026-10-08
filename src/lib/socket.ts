@@ -1,7 +1,6 @@
 import type { NSigFigs, WireL2Book, WireTrade } from "./types";
 
-/** Owns the single mainnet socket: subscription registry, backoff + jitter reconnect, resubscribe on
- *  open, ping/watchdog, and offline/online/visibility handling. A dead link leaves "live" up ≤ ~12s. */
+/** The single mainnet socket: subscription registry, reconnect with backoff, resubscribe, ping and watchdog. */
 export type Status = "connecting" | "live" | "reconnecting" | "offline";
 
 export type Sub =
@@ -9,24 +8,24 @@ export type Sub =
       type: "l2Book";
       coin: string;
       nSigFigs: NSigFigs;
-      /** Documented: `fast: true` sends the top 5 levels (~2×/s measured) instead of 20 (every
-       *  ~5s). The store merges both. */
+      /** `fast: true` sends the top 5 levels ~2×/s instead of 20 every ~5 s; the store merges both. */
       fast: boolean;
     }
   | { type: "trades"; coin: string };
 
 const WS_URL = "wss://api.hyperliquid.xyz/ws";
-/** Server drops idle connections after 60s (measured); ping well inside that. */
+/** The server drops idle connections after 60 s. */
 const PING_MS = 30_000;
-/** No snapshot for this long means the socket or the subscription is dead: drop and redo both.
- *  Live gaps peak at ~1.1s (fast) and ~5.9s (deep). */
+/** No snapshot for this long means the socket or subscription is dead (live gaps peak at ~5.9 s). */
 const STALE_MS = 10_000;
 const TICK_MS = 2_000;
-/** A blackholed route can leave the handshake pending for minutes; don't wait for it. */
+/** A blackholed route can leave the handshake pending for minutes. */
 const CONNECT_TIMEOUT_MS = 10_000;
-const MAX_BACKOFF_MS = 30_000;
-/** If the subscribe ACK never shows up, start accepting data anyway rather than freeze. */
-const ACK_TIMEOUT_MS = 2_000;
+const MAX_BACKOFF_MS = 10_000;
+/** Backoff resets only after this long of data, so a server that drops after one snapshot still backs off. */
+const STABLE_MS = 10_000;
+/** Accept data anyway if the ACK never arrives; inside STALE_MS so a lost ACK never forces a reconnect. */
+const ACK_TIMEOUT_MS = 5_000;
 
 interface Entry {
   sub: Sub;
@@ -44,6 +43,7 @@ let ws: WebSocket | null = null;
 let attempt = 0;
 let lastDataAt = 0;
 let lastPingAt = 0;
+let openedAt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let connectTimer: ReturnType<typeof setTimeout> | undefined;
 let pingTimer: ReturnType<typeof setInterval> | undefined;
@@ -65,7 +65,7 @@ export function onStatus(listener: (s: Status) => void) {
 
 function send(method: "subscribe" | "unsubscribe", sub: Sub) {
   if (ws?.readyState !== WebSocket.OPEN) return; // onopen resubscribes everything in the registry
-  // Unsubscribe must mirror the exact subscribe payload, so build it in one place.
+  // Unsubscribe must mirror the subscribe payload exactly.
   const subscription: Record<string, unknown> = { type: sub.type, coin: sub.coin };
   if (sub.type === "l2Book") {
     if (sub.nSigFigs !== null) subscription.nSigFigs = sub.nSigFigs;
@@ -82,7 +82,7 @@ function armAck(entry: Entry) {
   }, ACK_TIMEOUT_MS);
 }
 
-/** Register interest; returns an unsubscribe. Callers stop a key before subscribing it again. */
+/** Register interest; returns an unsubscribe. */
 export function subscribe(sub: Extract<Sub, { type: "l2Book" }>, onData: (data: WireL2Book) => void): () => void;
 export function subscribe(sub: Extract<Sub, { type: "trades" }>, onData: (data: WireTrade[]) => void): () => void;
 export function subscribe(sub: Sub, onData: Entry["onData"]): () => void {
@@ -98,7 +98,7 @@ export function subscribe(sub: Sub, onData: Entry["onData"]): () => void {
   };
 }
 
-/** Hand `data` to every acked entry that matches; a message for a switched-away coin finds none and drops here. */
+/** Hand `data` to every matching acked entry; a switched-away coin's message finds none. */
 function deliver(match: (sub: Sub) => boolean, data: unknown): boolean {
   let delivered = false;
   for (const entry of registry.values()) {
@@ -116,18 +116,17 @@ function onMessage(ev: MessageEvent<string>) {
     const data = msg.data as WireL2Book;
     const fast = data.fast === true;
     const delivered = deliver((s) => s.type === "l2Book" && s.coin === data.coin && s.fast === fast, data);
-    // "Live" and the backoff reset follow snapshots reaching the book, not socket open or orphan
-    // streams, so an accept-then-drop server cannot cause a tight loop.
+    // "Live" follows data reaching the book, not the socket opening.
     if (delivered) {
       lastDataAt = Date.now();
-      attempt = 0;
+      if (lastDataAt - openedAt > STABLE_MS) attempt = 0;
       setStatus("live");
     }
   } else if (msg.channel === "trades") {
     const data = msg.data as WireTrade[];
     if (data.length) deliver((s) => s.type === "trades" && s.coin === data[0].coin, data);
   } else if (msg.channel === "subscriptionResponse" && msg.data.method === "subscribe") {
-    // The echo is normalised (adds mantissa/fast), so match on our own fields, not deep equality.
+    // The echo is normalised (adds mantissa/fast), so match on our own fields.
     const echoed = msg.data.subscription;
     const entry = registry.get(keyOf({ ...echoed, nSigFigs: echoed.nSigFigs ?? null, fast: echoed.fast === true }));
     if (entry) {
@@ -135,7 +134,7 @@ function onMessage(ev: MessageEvent<string>) {
       clearTimeout(entry.ackTimer);
     }
   }
-  // Pongs deliberately don't feed the watchdog: they prove the socket, not the subscription.
+  // Pongs prove the socket, not the subscription, so they don't feed the watchdog.
 }
 
 function dropSocket() {
@@ -156,10 +155,10 @@ function scheduleReconnect() {
   setStatus(navigator.onLine ? "reconnecting" : "offline");
 }
 
-/** Keep the server's idle timer at bay, and drop a socket whose snapshots have stopped. */
+/** Ping when due, and drop a socket whose snapshots have stopped. */
 function tick() {
   if (Date.now() - lastDataAt > STALE_MS) {
-    // Half-open socket (typically after laptop sleep): close() alone may hang on the handshake.
+    // Half-open socket (e.g. after sleep): close() alone may hang.
     dropSocket();
     scheduleReconnect();
     return;
@@ -181,7 +180,7 @@ function connect() {
   }, CONNECT_TIMEOUT_MS);
   socket.onopen = () => {
     clearTimeout(connectTimer);
-    lastDataAt = lastPingAt = Date.now(); // grace period until the first snapshot
+    lastDataAt = lastPingAt = openedAt = Date.now(); // grace period until the first snapshot
     for (const entry of registry.values()) {
       send("subscribe", entry.sub);
       armAck(entry);
@@ -199,20 +198,22 @@ export function start() {
   if (started) return;
   started = true;
   window.addEventListener("offline", () => {
-    // navigator.onLine is only a hint and "online" may never fire, so keep retrying on the backoff schedule.
+    // "online" may never fire, so keep retrying on the backoff schedule.
     dropSocket();
     scheduleReconnect();
   });
   window.addEventListener("online", () => {
-    // Whatever socket exists was built on the old network; replace it now, not after backoff.
+    // The existing socket was built on the old network; replace it now.
     dropSocket();
     attempt = 0;
     setStatus("reconnecting");
     connect();
   });
   document.addEventListener("visibilitychange", () => {
-    // A handshake in flight has its own timeout; only an open socket gets the watchdog.
-    if (document.visibilityState === "visible" && ws?.readyState === WebSocket.OPEN) tick();
+    // Check an open socket now, and retry a pending reconnect without waiting out its backoff.
+    if (document.visibilityState !== "visible") return;
+    if (ws?.readyState === WebSocket.OPEN) tick();
+    else if (!ws) connect();
   });
   connect();
 }

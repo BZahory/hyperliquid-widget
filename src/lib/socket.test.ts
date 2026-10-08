@@ -50,6 +50,7 @@ beforeEach(async () => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 /** Subscribe to the fast BTC book, start, and open the socket. */
@@ -103,4 +104,58 @@ it("resubscribes the whole registry on every open", () => {
   const next = FakeWS.all[1];
   next.open();
   expect(subscribes(next).sort()).toEqual(["l2Book:", "l2Book:true", "trades:"]);
+});
+
+it("fails open 5s after a subscribe whose ACK never arrives", () => {
+  const { got, ws } = connect();
+  vi.advanceTimersByTime(4_900);
+  ws.recv("l2Book", snapshot);
+  expect(got).toHaveLength(0);
+  vi.advanceTimersByTime(200);
+  ws.recv("l2Book", snapshot);
+  expect(got).toHaveLength(1);
+});
+
+/** Milliseconds until the next socket is created (the backoff delay), in 100 ms steps. */
+function nextSocketAfter() {
+  const n = FakeWS.all.length;
+  let ms = 0;
+  while (FakeWS.all.length === n && ms < 60_000) {
+    vi.advanceTimersByTime(100);
+    ms += 100;
+  }
+  const ws = FakeWS.all[n];
+  ws.open();
+  ws.ack(true);
+  return { ms, ws };
+}
+
+it("backs off up to 10s while connections die young, and resets only after 10s of stable data", () => {
+  vi.spyOn(Math, "random").mockReturnValue(0.999); // the full, unjittered delay
+  let { ws } = connect();
+  ws.ack(true);
+  const delays: number[] = [];
+  for (let i = 0; i < 6; i++) {
+    ws.recv("l2Book", snapshot); // one snapshot, then the server drops us
+    ws.onclose?.();
+    const next = nextSocketAfter();
+    delays.push(next.ms);
+    ws = next.ws;
+  }
+  expect(delays).toEqual([1_000, 2_000, 4_000, 8_000, 10_000, 10_000]);
+
+  for (let s = 0; s <= 11; s++) {
+    ws.recv("l2Book", snapshot); // 11s of steady data
+    vi.advanceTimersByTime(1_000);
+  }
+  ws.onclose?.();
+  expect(nextSocketAfter().ms).toBe(1_000);
+});
+
+it("retries a pending reconnect as soon as the tab becomes visible", () => {
+  const { ws } = connect();
+  ws.onclose?.();
+  expect(FakeWS.all).toHaveLength(1);
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(FakeWS.all).toHaveLength(2);
 });
