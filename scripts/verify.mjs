@@ -50,6 +50,9 @@ await page.addInitScript(() => {
     },
   };
   window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = new Proxy(hook, { get: (t, k) => (k in t ? t[k] : () => {}) });
+  // Book row flashes only; fills flash too, but by other animations.
+  window.__FLASHES__ = 0;
+  document.addEventListener("animationstart", (e) => /^flash-[ab]$/.test(e.animationName) && window.__FLASHES__++, true);
 });
 const consoleErrors = [];
 // A reconnect attempt while offline logs a failed-connection error; that is the expected path.
@@ -98,10 +101,10 @@ await waitForLevels();
 const initial = await prices();
 check("connects and renders levels", initial.length >= 20, `${initial.length} level rows`);
 
+const flashesAt = () => page.evaluate(() => [window.__FLASHES__, window.__RENDER_STATS__.commits]);
+const [flashes0, commits0] = await flashesAt();
 const changes = await countChanges(5_000);
 check("book updates visibly", changes >= 3, `${changes} distinct frames in 5s`);
-const flashes = await page.$$eval('.row[class*="flash-"]', (r) => r.length);
-check("change flashes are applied", flashes > 0, `${flashes} rows carry a flash class`);
 const stats = await page.evaluate(() => window.__RENDER_STATS__);
 check(
   "memoized rows render only when their props change",
@@ -149,6 +152,7 @@ await page.getByTestId("spread").click();
 check("outside click closes the menu", (await market.getAttribute("aria-expanded")) === "false");
 
 await market.click();
+const flashesBeforeSwitch = await page.evaluate(() => window.__FLASHES__);
 await page.getByRole("option", { name: "ETH-USD" }).click();
 const rightAfter = await page.evaluate(() => ({
   levels: document.querySelectorAll('[data-testid="book"] .row[data-kind="level"]').length,
@@ -157,6 +161,7 @@ const rightAfter = await page.evaluate(() => ({
 check("switch clears old rows synchronously", rightAfter.levels === 0 && rightAfter.loading, `${rightAfter.levels} level rows, skeleton shown`);
 await waitForLevels();
 const eth = await prices();
+const switchFlashes = (await page.evaluate(() => window.__FLASHES__)) - flashesBeforeSwitch;
 check("ETH book renders after switch", eth.length >= 20 && Math.max(...eth) < Math.min(...initial) / 5, `ETH ≈ ${eth[0]} vs BTC ≈ ${initial[0]}`);
 
 await page.getByRole("tab", { name: "Trades" }).click();
@@ -171,8 +176,14 @@ check(
   fills.length >= 10 && fills.every((f) => f.side && /^\d{2}:\d{2}:\d{2}$/.test(f.time)),
   `${fills.length} fills, newest ${fills[0]?.time}`,
 );
+const flashesBeforeOrders = await page.evaluate(() => window.__FLASHES__);
 await page.getByRole("tab", { name: "Orders" }).click();
 await waitForLevels();
+const tabFlashes = await page.evaluate(
+  (before) => new Promise((r) => requestAnimationFrame(() => r(window.__FLASHES__ - before))),
+  flashesBeforeOrders,
+);
+check("no flashes replayed by a market or tab switch", switchFlashes === 0 && tabFlashes === 0, `${switchFlashes} on the market switch, ${tabFlashes} on the tab switch`);
 
 // End + Enter picks the last option: full precision.
 const grouping = page.getByRole("combobox", { name: "Price grouping" });
@@ -202,6 +213,11 @@ await waitForStatus("live", 30_000);
 check("reconnects when back online", true);
 const resumed = await countChanges(5_000);
 check("data resumes after reconnect", resumed >= 2, `${resumed} distinct frames in 5s`);
+
+// Over the whole run: ~1 row per frame flashes, where any change would flash 7–9.
+const [flashes1, commits1] = await flashesAt();
+const perFrame = (flashes1 - flashes0) / (commits1 - commits0);
+check("changed rows flash, about one per frame", perFrame > 0 && perFrame <= 3, `${perFrame.toFixed(2)} of 24 rows per frame over ${commits1 - commits0} frames`);
 
 await page.screenshot({ path: process.env.SHOT ?? "verify.png" });
 check("zero console errors", consoleErrors.length === 0, consoleErrors.join(" | ").slice(0, 300));

@@ -14,17 +14,7 @@ export function Book() {
   const loading = useStore(store, (s) => s.loading);
 
   const row = (side: "ask" | "bid", slot: Slot, i: number) => (
-    <Row
-      key={i}
-      side={side}
-      kind={kindOf(slot)}
-      px={slot.px}
-      sz={slot.sz}
-      total={slot.total}
-      ratio={slot.ratio}
-      flash={slot.flash}
-      flashSeq={slot.flashSeq}
-    />
+    <Row key={i} side={side} kind={kindOf(slot)} {...slot} />
   );
 
   return (

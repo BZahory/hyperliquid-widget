@@ -1,9 +1,13 @@
-import type { DisplayBook, Flash, Grouping, NSigFigs, Slot, TradeSlot, WireL2Book, WireLevel, WireTrade } from "./types";
+import type { DisplayBook, Grouping, NSigFigs, Slot, TradeSlot, WireL2Book, WireLevel, WireTrade } from "./types";
 
 /** Rows per side. Fixed so the DOM never changes shape. */
 export const DEPTH = 12;
 /** Rows in the trades tab: the same height as both sides of the book plus the spread row. */
 export const TRADES = DEPTH * 2 + 1;
+/** A level flashes when its size changes by ≥ FLASH_PCT% and by ≥ FLASH_AVGS average levels of its side;
+ *  the size floor keeps dust orders (a 100% change) from flashing every frame (see README). */
+const FLASH_PCT = 50;
+const FLASH_AVGS = 2;
 
 export interface DeriveOptions {
   szDecimals: number;
@@ -12,17 +16,7 @@ export interface DeriveOptions {
   quote: boolean;
 }
 
-/** Previous frame's parsed sizes keyed by wire price string, for change detection. */
-type Sizes = ReadonlyMap<string, number>;
-
-export interface Derived {
-  book: DisplayBook;
-  sizes: [bids: Sizes, asks: Sizes];
-  /** Deepest price known per side last frame (±Infinity when that side was empty); levels beyond it are learned, not new. */
-  edges: [bid: number, ask: number];
-}
-
-const EMPTY_SLOT: Slot = { px: "", sz: "", total: "", ratio: 0, flash: "", flashSeq: 0 };
+const EMPTY_SLOT: Slot = { px: "", sz: "", total: "", ratio: 0, flash: 0 };
 
 export const EMPTY_BOOK: DisplayBook = {
   asks: Array<Slot>(DEPTH).fill(EMPTY_SLOT),
@@ -68,7 +62,7 @@ function tickOf(price: number, nSigFigs: NSigFigs, szDecimals: number): number {
 const fmtTick = (tick: number) => fmt(tick, Math.max(0, -Math.round(Math.log10(tick))));
 
 /** Grouping options by step, coarse → fine, each step once; reuses `prev` when unchanged to avoid renders. */
-function groupingsAt(price: number, szDecimals: number, prev: Grouping[] | undefined): Grouping[] {
+function groupingsAt(price: number, szDecimals: number, prev: Grouping[]): Grouping[] {
   const full = tickOf(price, null, szDecimals);
   const next: Grouping[] = [];
   for (const n of [2, 3, 4, 5] as const) {
@@ -76,60 +70,54 @@ function groupingsAt(price: number, szDecimals: number, prev: Grouping[] | undef
     if (tick > full) next.push({ value: n, label: fmtTick(tick) });
   }
   next.push({ value: null, label: fmtTick(full) });
-  const same = prev?.length === next.length && next.every((g, i) => g.label === prev[i].label);
+  const same = prev.length === next.length && next.every((g, i) => g.label === prev[i].label);
   return same ? prev : next;
 }
 
 interface Side {
-  bids: boolean;
-  /** Wire price strings of the displayed levels: canonical within one grouping, so usable as change-detection keys. */
-  keys: string[];
   px: number[];
   sz: number[];
   /** Cumulative size in base units, and in quote units (Σ size × price). */
   cum: number[];
   cumQuote: number[];
-  sizes: Map<string, number>;
-  edge: number;
   pxDecimals: number;
 }
 
-function parseSide(levels: WireLevel[], bids: boolean): Side {
-  const n = Math.min(levels.length, DEPTH);
-  const keys = new Array<string>(n);
-  const px = new Array<number>(n);
-  const sz = new Array<number>(n);
-  const cum = new Array<number>(n);
-  const cumQuote = new Array<number>(n);
-  const sizes = new Map<string, number>();
+function parseSide(wire: WireLevel[]): Side {
+  const levels = wire.slice(0, DEPTH);
+  const px = levels.map((l) => Number(l.px));
+  const sz = levels.map((l) => Number(l.sz));
+  const cum: number[] = [];
+  const cumQuote: number[] = [];
   let acc = 0;
   let accQuote = 0;
   let pxDecimals = 0;
   for (let i = 0; i < levels.length; i++) {
-    const level = levels[i];
-    const size = Number(level.sz);
-    // Remember sizes beyond the displayed depth too, so a level scrolling into view is not mistaken for a new one.
-    sizes.set(level.px, size);
-    if (i >= n) continue;
-    keys[i] = level.px;
-    px[i] = Number(level.px);
-    sz[i] = size;
-    acc += size;
-    accQuote += size * px[i];
-    cum[i] = acc;
-    cumQuote[i] = accQuote;
-    pxDecimals = Math.max(pxDecimals, fracDigits(level.px));
+    acc += sz[i];
+    accQuote += sz[i] * px[i];
+    cum.push(acc);
+    cumQuote.push(accQuote);
+    pxDecimals = Math.max(pxDecimals, fracDigits(levels[i].px));
   }
-  // An empty side knows no prices, so nothing can be "inside" its range next frame.
-  const edge = levels.length ? Number(levels[levels.length - 1].px) : bids ? Infinity : -Infinity;
-  return { bids, keys, px, sz, cum, cumQuote, sizes, edge, pxDecimals };
+  return { px, sz, cum, cumQuote, pxDecimals };
 }
 
-function buildSlots(side: Side, prev: Derived | null, max: number, pxDecimals: number, opts: DeriveOptions, live: number): Slot[] {
-  const i0 = side.bids ? 0 : 1;
-  const prevSlots = prev ? (side.bids ? prev.book.bids : prev.book.asks) : null;
+/** What a frame is compared with to find changed levels. */
+export interface Change {
+  /** The previous full snapshot, so a level scrolling into view isn't new. */
+  before: WireL2Book;
+  /** Fast-feed levels per side [bids, asks]; only these flash (deeper rows change in ~5 s batches). */
+  live: [number, number];
+}
+
+function buildSlots(side: Side, bids: boolean, max: number, pxDecimals: number, opts: DeriveOptions, prev: Slot[], change: Change | null): Slot[] {
   const cum = opts.quote ? side.cumQuote : side.cum;
   const decimals = opts.quote ? 0 : opts.szDecimals;
+  const before = change?.before.levels[bids ? 0 : 1] ?? [];
+  const sizes = new Map(before.map((l) => [Number(l.px), Number(l.sz)]));
+  const edge = before.length ? Number(before[before.length - 1].px) : undefined;
+  const live = change?.live[bids ? 0 : 1] ?? 0;
+  const floor = FLASH_AVGS * (side.cum[side.cum.length - 1] ?? 0);
   const slots = new Array<Slot>(DEPTH);
   for (let i = 0; i < DEPTH; i++) {
     if (i >= side.px.length) {
@@ -137,27 +125,13 @@ function buildSlots(side: Side, prev: Derived | null, max: number, pxDecimals: n
       continue;
     }
     const size = side.sz[i];
-    // Flash state lives on the slot until the next change there, so finished animations never
-    // re-trigger from unrelated frames or row shifts.
-    const prevSlot = prevSlots ? prevSlots[i] : EMPTY_SLOT;
-    let flash = prevSlot.flash;
-    let flashSeq = prevSlot.flashSeq;
-    // Rows past the fast feed change only in ~5s batches when a deep snapshot lands: not news.
-    if (prev && i < live) {
-      const before = prev.sizes[i0].get(side.keys[i]);
-      let dir: Flash = "";
-      if (before === undefined) {
-        // Unknown price inside the known range = new level; beyond it = depth we only just learned
-        // about (e.g. the deep snapshot landing after the fast one), not news.
-        const inside = side.bids ? side.px[i] > prev.edges[i0] : side.px[i] < prev.edges[i0];
-        if (inside) dir = "up";
-      } else if (size !== before) {
-        dir = size > before ? "up" : "down";
-      }
-      if (dir) {
-        flash = dir;
-        flashSeq = prevSlot.flashSeq + 1;
-      }
+    // An unknown price is new inside last frame's range, but beyond it is only newly learned depth.
+    let flash = prev[i].flash;
+    if (i < live) {
+      const inside = edge !== undefined && (bids ? side.px[i] > edge : side.px[i] < edge);
+      const was = sizes.get(side.px[i]) ?? (inside ? 0 : size);
+      const delta = Math.abs(size - was);
+      if (delta * 100 >= FLASH_PCT * Math.max(size, was) && delta * side.sz.length >= floor) flash++;
     }
     slots[i] = {
       px: fmt(side.px[i], pxDecimals),
@@ -165,7 +139,6 @@ function buildSlots(side: Side, prev: Derived | null, max: number, pxDecimals: n
       total: fmt(cum[i], decimals),
       ratio: cum[i] / max,
       flash,
-      flashSeq,
     };
   }
   return slots;
@@ -188,12 +161,10 @@ export function mergeSnapshots(fast: WireL2Book | null, deep: WireL2Book | null)
   };
 }
 
-/** One-pass derivation: parse, cumulative sums, a max shared by both sides, change detection against
- *  the previous frame, formatting. `prev = null` renders a clean baseline with no flashes; only the
- *  top `fastLen` rows per side (all rows when omitted) can flash. */
-export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveOptions, fastLen?: [bids: number, asks: number]): Derived {
-  const bids = parseSide(snap.levels[0], true);
-  const asks = parseSide(snap.levels[1], false);
+/** Sums, shared max, change detection and formatting in one pass; with no `change` nothing flashes. */
+export function deriveBook(snap: WireL2Book, prev: DisplayBook, opts: DeriveOptions, change: Change | null = null): DisplayBook {
+  const bids = parseSide(snap.levels[0]);
+  const asks = parseSide(snap.levels[1]);
   const depthOf = (s: Side) => (opts.quote ? s.cumQuote : s.cum)[s.cum.length - 1] ?? 0;
   const bidDepth = depthOf(bids);
   const askDepth = depthOf(asks);
@@ -203,11 +174,11 @@ export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveO
   let spread = "";
   let spreadPct = "";
   let tick = "";
-  let groupings = prev?.book.groupings ?? [];
+  let groupings = prev.groupings;
   const ref = bids.px.length && asks.px.length ? (bids.px[0] + asks.px[0]) / 2 : (bids.px[0] ?? asks.px[0]);
   if (ref !== undefined) {
     tick = fmtTick(tickOf(ref, opts.nSigFigs, opts.szDecimals));
-    groupings = groupingsAt(ref, opts.szDecimals, prev?.book.groupings);
+    groupings = groupingsAt(ref, opts.szDecimals, prev.groupings);
     if (bids.px.length && asks.px.length) {
       // Grouped levels are a whole step apart; the wire's spread is the real one.
       const abs = snap.spread ? Number(snap.spread) : asks.px[0] - bids.px[0];
@@ -216,16 +187,12 @@ export function deriveBook(snap: WireL2Book, prev: Derived | null, opts: DeriveO
     }
   }
   return {
-    book: {
-      asks: buildSlots(asks, prev, max, pxDecimals, opts, fastLen?.[1] ?? DEPTH),
-      bids: buildSlots(bids, prev, max, pxDecimals, opts, fastLen?.[0] ?? DEPTH),
-      spread,
-      spreadPct,
-      tick,
-      groupings,
-    },
-    sizes: [bids.sizes, asks.sizes],
-    edges: [bids.edge, asks.edge],
+    asks: buildSlots(asks, false, max, pxDecimals, opts, prev.asks, change),
+    bids: buildSlots(bids, true, max, pxDecimals, opts, prev.bids, change),
+    spread,
+    spreadPct,
+    tick,
+    groupings,
   };
 }
 

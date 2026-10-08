@@ -32,17 +32,14 @@ export interface WireTrade {
 export type NSigFigs = null | 5 | 4 | 3 | 2;
 
 /** Display shapes: preformatted strings and 0..1 ratios; components never parse or format. */
-export type Flash = "" | "up" | "down";
-
 export interface Slot {
   px: string;
   sz: string;
   total: string;
   /** Cumulative size / max cumulative across both sides. */
   ratio: number;
-  flash: Flash;
-  /** Increments on every flash at this slot; parity alternates the CSS animation name so it restarts. */
-  flashSeq: number;
+  /** Flash count; its parity alternates two identical animations so a flash restarts without remounting. */
+  flash: number;
 }
 
 /** A grouping option labelled by its price step. */
@@ -50,6 +47,9 @@ export interface Grouping {
   value: NSigFigs;
   label: string;
 }
+
+/** A fill's flash: its taker side. */
+type Flash = "" | "up" | "down";
 
 export interface TradeSlot {
   px: string;

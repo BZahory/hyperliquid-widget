@@ -28,6 +28,8 @@ const book = (bids: [string, string][], fast = false): WireL2Book => ({
   levels: [bids.map(([px, sz]) => ({ px, sz, n: 1 })), [{ px: "101", sz: "1", n: 1 }]],
   ...(fast && { fast }),
 });
+/** `n` bid levels at 1 apart from `top` down, all of size `sz`. */
+const ladder = (top: number, n: number, sz = "9"): [string, string][] => Array.from({ length: n }, (_, i) => [`${top - i}`, sz]);
 const bidSizes = () => mod.store.getState().book.bids.slice(0, 3).map((s) => s.sz);
 
 it("keeps a level's last fast size when it leaves the fast window, until the next deep snapshot", () => {
@@ -51,4 +53,17 @@ it("clears the grouping labels on a coin switch, keeps them on a precision switc
   expect([labels(), mod.store.getState().book.tick]).toEqual([["1,000", "100", "10", "1"], "1,000"]);
   mod.setCoin("ETH");
   expect(labels()).toEqual([]);
+});
+
+it("flashes a changed level, never the first frame, and clears flashes when the tab switches", () => {
+  const flashes = () => mod.store.getState().book.bids.slice(0, 2).map((s) => s.flash);
+  feeds.deep(book(ladder(100, 6)));
+  feeds.fast(book(ladder(100, 2), true));
+  flush();
+  expect(flashes()).toEqual([0, 0]);
+  feeds.fast(book([["100", "9"], ["99", "90"]], true));
+  flush();
+  expect(flashes()).toEqual([0, 1]);
+  mod.setTab("trades");
+  expect(flashes()).toEqual([0, 0]);
 });

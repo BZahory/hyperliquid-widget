@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DEPTH, deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, mergeSnapshots, prependTrades, TRADES, type Derived, type DeriveOptions } from "./derive";
-import type { WireL2Book, WireLevel, WireTrade } from "./types";
+import { DEPTH, deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, mergeSnapshots, prependTrades, TRADES, type DeriveOptions } from "./derive";
+import type { DisplayBook, WireL2Book, WireLevel, WireTrade } from "./types";
 
 const level = (px: string, sz: string): WireLevel => ({ px, sz, n: 1 });
 const snap = (bids: [string, string][], asks: [string, string][]): WireL2Book => ({
@@ -9,20 +9,21 @@ const snap = (bids: [string, string][], asks: [string, string][]): WireL2Book =>
   levels: [bids.map(([px, sz]) => level(px, sz)), asks.map(([px, sz]) => level(px, sz))],
 });
 const opts: DeriveOptions = { szDecimals: 5, nSigFigs: null, quote: false };
-const derive = (s: WireL2Book, prev: Derived | null = null, o = opts) => deriveBook(s, prev, o);
+const eth: DeriveOptions = { szDecimals: 4, nSigFigs: null, quote: false };
+const derive = (s: WireL2Book, prev: DisplayBook | null = null, o = opts) => deriveBook(s, prev ?? EMPTY_BOOK, o);
 
 describe("deriveBook", () => {
   it("pads every side to DEPTH slots and keeps EMPTY_BOOK the same shape", () => {
-    const { book } = derive(snap([["100.0", "1"]], [["101.0", "1"], ["102.0", "1"]]));
+    const book = derive(snap([["100.0", "1"]], [["101.0", "1"], ["102.0", "1"]]));
     expect(book.bids).toHaveLength(DEPTH);
     expect(book.asks).toHaveLength(DEPTH);
-    expect(book.bids[1]).toEqual({ px: "", sz: "", total: "", ratio: 0, flash: "", flashSeq: 0 });
-    expect(book.asks[2].px).toBe("");
+    expect(book.bids[1]).toEqual(EMPTY_BOOK.bids[0]);
+    expect(book.bids[1]).toMatchObject({ px: "", sz: "", total: "", ratio: 0, flash: 0 });
     expect(EMPTY_BOOK.asks).toHaveLength(DEPTH);
   });
 
   it("accumulates per side and scales both sides by one shared max", () => {
-    const { book } = derive(snap([["100.0", "1"], ["99.0", "2"], ["98.0", "3"]], [["101.0", "1"], ["102.0", "1"]]));
+    const book = derive(snap([["100.0", "1"], ["99.0", "2"], ["98.0", "3"]], [["101.0", "1"], ["102.0", "1"]]));
     expect(book.bids.slice(0, 3).map((s) => s.total)).toEqual(["1.00000", "3.00000", "6.00000"]);
     expect(book.asks.slice(0, 2).map((s) => s.total)).toEqual(["1.00000", "2.00000"]);
     expect(book.bids.slice(0, 3).map((s) => s.ratio)).toEqual([1 / 6, 3 / 6, 1]);
@@ -31,149 +32,114 @@ describe("deriveBook", () => {
 
   it("only uses the displayed depth for cumulative totals", () => {
     const bids: [string, string][] = Array.from({ length: 20 }, (_, i) => [`${100 - i}.0`, "1"]);
-    const { book } = derive(snap(bids, [["101.0", "1"]]));
+    const book = derive(snap(bids, [["101.0", "1"]]));
     expect(book.bids[DEPTH - 1].total).toBe(`${DEPTH}.00000`);
     expect(book.bids[DEPTH - 1].ratio).toBe(1);
   });
 
   it("formats prices with thousands separators and the snapshot's shared decimals", () => {
-    const btc = derive(snap([["83452.0", "1"]], [["83453.0", "1"]])).book;
-    expect(btc.bids[0].px).toBe("83,452");
-    const eth = derive(snap([["2568.0", "1"]], [["2568.1", "1"]])).book;
-    expect(eth.bids[0].px).toBe("2,568.0"); // padded to match the 1-decimal neighbour
-    expect(eth.asks[0].px).toBe("2,568.1");
+    expect(derive(snap([["83452.0", "1"]], [["83453.0", "1"]])).bids[0].px).toBe("83,452");
+    const book = derive(snap([["2568.0", "1"]], [["2568.1", "1"]]), null, eth);
+    expect(book.bids[0].px).toBe("2,568.0"); // padded to match the 1-decimal neighbour
+    expect(book.asks[0].px).toBe("2,568.1");
+  });
+
+  it("formats a dot-less wire price", () => {
+    expect(derive(snap([["83452", "1"]], [["83453", "1"]])).bids[0].px).toBe("83,452");
   });
 
   it("reports spread and spread %", () => {
-    const { book } = derive(snap([["83450.0", "1"], ["83440.0", "1"]], [["83460.0", "1"], ["83470.0", "1"]]));
+    const book = derive(snap([["83450.0", "1"], ["83440.0", "1"]], [["83460.0", "1"], ["83470.0", "1"]]));
     expect(book.spread).toBe("10");
     expect(book.spreadPct).toBe("0.012%");
-    const eth = derive(snap([["2568.1", "1"]], [["2568.2", "1"]])).book;
-    expect(eth.spread).toBe("0.1");
+    expect(derive(snap([["2568.1", "1"]], [["2568.2", "1"]])).spread).toBe("0.1");
   });
 
   it("uses the wire's full-precision spread when grouped", () => {
     const grouped = { ...snap([["83000.0", "1"]], [["84000.0", "1"]]), spread: "1.0" };
-    expect(derive(grouped, null, { ...opts, nSigFigs: 2 }).book).toMatchObject({ spread: "1", spreadPct: "0.001%" });
-    const eth = { ...snap([["2560.0", "1"]], [["2570.0", "1"]]), spread: "0.1" };
-    expect(derive(eth, null, { ...opts, nSigFigs: 3 }).book.spread).toBe("0.1");
+    expect(derive(grouped, null, { ...opts, nSigFigs: 2 })).toMatchObject({ spread: "1", spreadPct: "0.001%" });
+    const ethGrouped = { ...snap([["2560.0", "1"]], [["2570.0", "1"]]), spread: "0.1" };
+    expect(derive(ethGrouped, null, { ...opts, nSigFigs: 3 }).spread).toBe("0.1");
     expect(mergeSnapshots(grouped, snap([["82000.0", "1"]], [["85000.0", "1"]]))!.spread).toBe("1.0");
+  });
+
+  it("leaves spread blank when a side is empty", () => {
+    const book = derive(snap([], [["101.0", "1"]]));
+    expect(book).toMatchObject({ spread: "", spreadPct: "" });
   });
 
   it("derives the grouping tick from nSigFigs and price magnitude, not from level gaps", () => {
     const thin = snap([["83450.0", "1"], ["83447.0", "1"]], [["83453.0", "1"]]); // gaps of 3
-    expect(derive(thin).book.tick).toBe("1");
-    expect(derive(thin, null, { ...opts, nSigFigs: 4 }).book.tick).toBe("10");
-    expect(derive(thin, null, { ...opts, nSigFigs: 2 }).book.tick).toBe("1,000");
-    const eth: DeriveOptions = { szDecimals: 4, nSigFigs: null, quote: false };
-    expect(derive(snap([["2568.0", "1"]], [["2568.0", "1"]]), null, eth).book.tick).toBe("0.1");
-    expect(derive(snap([["2568.0", "1"]], [["2568.0", "1"]]), null, { ...eth, nSigFigs: 3 }).book.tick).toBe("10");
-    expect(derive(snap([["123456.0", "1"]], [["123457.0", "1"]])).book.tick).toBe("1"); // integers always allowed
-    expect(derive(snap([["123456.0", "1"]], [["123457.0", "1"]]), null, { ...opts, nSigFigs: 5 }).book.tick).toBe("10");
+    expect(derive(thin).tick).toBe("1");
+    expect(derive(thin, null, { ...opts, nSigFigs: 4 }).tick).toBe("10");
+    expect(derive(thin, null, { ...opts, nSigFigs: 2 }).tick).toBe("1,000");
+    expect(derive(snap([["2568.0", "1"]], [["2568.0", "1"]]), null, eth).tick).toBe("0.1");
+    expect(derive(snap([["2568.0", "1"]], [["2568.0", "1"]]), null, { ...eth, nSigFigs: 3 }).tick).toBe("10");
+    expect(derive(snap([["123456.0", "1"]], [["123457.0", "1"]])).tick).toBe("1"); // integers always allowed
+    expect(derive(snap([["123456.0", "1"]], [["123457.0", "1"]]), null, { ...opts, nSigFigs: 5 }).tick).toBe("10");
   });
 
   it("labels precision options by price step, lists each step once, and reuses the array when unchanged", () => {
     // At ~83k, nSigFigs 5 and full precision are both 1, so only full precision is offered.
     const btc = derive(snap([["83452.0", "1"]], [["83453.0", "1"]]));
-    expect(btc.book.groupings).toEqual([
+    expect(btc.groupings).toEqual([
       { value: 2, label: "1,000" },
       { value: 3, label: "100" },
       { value: 4, label: "10" },
       { value: null, label: "1" },
     ]);
-    expect(derive(snap([["83450.0", "1"]], [["83451.0", "1"]]), btc).book.groupings).toBe(btc.book.groupings);
-    const eth: DeriveOptions = { szDecimals: 4, nSigFigs: null, quote: false };
-    const labels = (bid: string, ask: string, o = eth) => derive(snap([[bid, "1"]], [[ask, "1"]]), null, o).book.groupings.map((g) => g.label);
+    expect(derive(snap([["83450.0", "1"]], [["83451.0", "1"]]), btc).groupings).toBe(btc.groupings);
+    const labels = (bid: string, ask: string, o = eth) => derive(snap([[bid, "1"]], [[ask, "1"]]), null, o).groupings.map((g) => g.label);
     expect(labels("2568.1", "2568.2")).toEqual(["100", "10", "1", "0.1"]);
     expect(labels("999.95", "999.96")).toEqual(["10", "1", "0.1", "0.01"]);
     // Above 100k, nSigFigs 5 and full precision diverge, so both are offered.
     expect(labels("123456.0", "123457.0", opts)).toEqual(["10,000", "1,000", "100", "10", "1"]);
   });
 
-  it("formats a dot-less wire price", () => {
-    expect(derive(snap([["83452", "1"]], [["83453", "1"]])).book.bids[0].px).toBe("83,452");
-  });
-
-  it("leaves spread blank when a side is empty", () => {
-    const { book } = derive(snap([], [["101.0", "1"]]));
-    expect(book.spread).toBe("");
-    expect(book.spreadPct).toBe("");
-  });
-
-  it("does not flash on the first snapshot", () => {
-    const { book } = derive(snap([["100.0", "1"]], [["101.0", "1"]]));
-    expect(book.bids[0].flash).toBe("");
-    expect(book.bids[0].flashSeq).toBe(0);
-  });
-
-  it("flashes up/down on size change, persists until the next change, and alternates parity", () => {
-    const a = derive(snap([["100.0", "1"]], [["101.0", "1"]]));
-    const b = derive(snap([["100.0", "2"]], [["101.0", "1"]]), a);
-    expect(b.book.bids[0]).toMatchObject({ flash: "up", flashSeq: 1 });
-    expect(b.book.asks[0]).toMatchObject({ flash: "", flashSeq: 0 });
-    const c = derive(snap([["100.0", "1.5"]], [["101.0", "1"]]), b);
-    expect(c.book.bids[0]).toMatchObject({ flash: "down", flashSeq: 2 });
-    const d = derive(snap([["100.0", "1.5"]], [["101.0", "1"]]), c);
-    expect(d.book.bids[0]).toMatchObject({ flash: "down", flashSeq: 2 }); // unchanged: no retrigger
-    const e = derive(snap([["100.0", "1.6"]], [["101.0", "1"]]), d);
-    expect(e.book.bids[0]).toMatchObject({ flash: "up", flashSeq: 3 });
-  });
-
-  it("treats a brand-new price level as an increase", () => {
-    const a = derive(snap([["100.0", "1"]], [["101.0", "1"]]));
-    const b = derive(snap([["100.5", "1"], ["100.0", "1"]], [["101.0", "1"]]), a);
-    expect(b.book.bids[0]).toMatchObject({ px: "100.5", flash: "up", flashSeq: 1 });
-    expect(b.book.bids[1].flash).toBe(""); // same price, same size, shifted a slot: no flash
-  });
-
-  it("does not mistake a level scrolling in from beyond DEPTH for a new one", () => {
-    const bids: [string, string][] = Array.from({ length: 15 }, (_, i) => [`${100 - i}.0`, "1"]);
-    const a = derive(snap(bids, [["101.0", "1"]]));
-    const b = derive(snap(bids.slice(1), [["101.0", "1"]]), a);
-    expect(b.book.bids[DEPTH - 1].px).toBe(`${100 - DEPTH}`);
-    expect(b.book.bids[DEPTH - 1].flash).toBe("");
-  });
-
-  it("does not flash depth it only just learned about beyond the previous deepest level", () => {
-    const fastOnly = derive(snap([["100.0", "1"], ["99.9", "1"]], [["100.1", "1"]]));
-    const withDeep = derive(snap([["100.0", "1"], ["99.9", "1"], ["99.8", "5"], ["99.7", "5"]], [["100.1", "1"]]), fastOnly);
-    expect(withDeep.book.bids.slice(0, 4).map((s) => s.flash)).toEqual(["", "", "", ""]);
-    // ...but a price appearing inside the known range is new and flashes.
-    const gapFilled = derive(snap([["100.0", "1"], ["99.9", "1"], ["99.85", "2"], ["99.8", "5"]], [["100.1", "1"]]), withDeep);
-    expect(gapFilled.book.bids[2]).toMatchObject({ px: "99.85", flash: "up", flashSeq: 1 });
-  });
-
-  it("flashes only rows the fast feed covers; deeper rows keep their previous flash state", () => {
-    const a = derive(snap([["100.0", "1"], ["99.9", "1"], ["99.8", "1"]], [["100.1", "1"]]));
-    const b = deriveBook(snap([["100.0", "2"], ["99.9", "1"], ["99.8", "3"]], [["100.1", "1"]]), a, opts, [2, 1]);
-    expect(b.book.bids[0]).toMatchObject({ flash: "up", flashSeq: 1 });
-    expect(b.book.bids[2]).toMatchObject({ sz: "3.00000", flash: "", flashSeq: 0 });
-  });
-
-  it("re-deriving the identical snapshot in quote mode keeps flash state and switches units", () => {
-    const a = derive(snap([["100.0", "1"]], [["101.0", "1"]]));
-    const changed = snap([["100.0", "2.4"]], [["101.0", "1"]]);
-    const b = derive(changed, a);
-    const c = derive(changed, b, { ...opts, quote: true });
-    expect(c.book.bids[0]).toMatchObject({ sz: "240", total: "240", flash: "up", flashSeq: 1 });
-    expect(c.book.asks[0].sz).toBe("101"); // 1 × 101.0, rounded to whole USD
-  });
-
   it("quote mode accumulates each level's own notional and scales bars by it", () => {
-    const { book } = derive(snap([["2500.0", "1"], ["2400.0", "1"], ["2300.0", "1"]], [["2600.0", "2"]]), null, {
-      ...opts,
-      quote: true,
-    });
+    const book = derive(snap([["2500.0", "1"], ["2400.0", "1"], ["2300.0", "1"]], [["2600.0", "2"]]), null, { ...opts, quote: true });
     expect(book.bids.slice(0, 3).map((s) => s.total)).toEqual(["2,500", "4,900", "7,200"]);
-    expect(book.asks[0].total).toBe("5,200");
+    expect(book.asks[0]).toMatchObject({ sz: "5,200", total: "5,200" });
     expect(book.bids[2].ratio).toBe(1);
     expect(book.asks[0].ratio).toBeCloseTo(5200 / 7200);
   });
+});
 
-  it("does not flash when a previously empty side gains levels", () => {
-    const a = derive(snap([], [["101.0", "1"]]));
-    const b = derive(snap([["100.0", "1"], ["99.9", "1"]], [["101.0", "1"]]), a);
-    expect(b.book.bids.slice(0, 2).map((s) => s.flash)).toEqual(["", ""]);
+describe("flashes", () => {
+  // Four levels and a dust tail.
+  const dust: [string, string][] = [96, 95, 94, 93, 92, 91].map((px) => [`${px}.0`, "0.01"]);
+  const top: [string, string][] = [["100.0", "20"], ["99.0", "20"], ["98.0", "1"], ["97.0", "1"]];
+  const before = snap(top.concat(dust), [["101.0", "1"], ["102.0", "1"], ["103.0", "1"]]);
+  const bidsOf = (bids: [string, string][]): WireL2Book => ({ ...before, levels: [snap(bids, []).levels[0], before.levels[1]] });
+  const flashes = (next: WireL2Book, live: [number, number] = [DEPTH, DEPTH], prev = derive(before)) =>
+    deriveBook(next, prev, opts, { before, live }).bids.map((s) => s.flash);
+
+  it("never on a first snapshot", () => {
+    expect(derive(before).bids.every((s) => s.flash === 0)).toBe(true);
+  });
+
+  it("when a level's size at least doubles or halves by at least two average levels", () => {
+    // Two average levels are 18.4: 20 → 40 flashes, 20 → 39 isn't double, 1 → 12 is too small.
+    const next = bidsOf([["100.0", "40"], ["99.0", "39"], ["98.0", "12"], ["97.0", "1"], ...dust]);
+    expect(flashes(next).slice(0, 4)).toEqual([1, 0, 0, 0]);
+  });
+
+  it("not when the change is under two average levels, as for a dust order at a new price", () => {
+    const next = bidsOf([["100.5", "0.05"], ...top, ["96.0", "0.5"], ...dust.slice(1)]);
+    expect(flashes(next).every((f) => f === 0)).toBe(true);
+  });
+
+  it("for a new level inside the known range, not for depth only just learned beyond it", () => {
+    const next = bidsOf([["100.5", "12"], ...top, ...dust, ["90.0", "12"]]);
+    expect(flashes(next)).toEqual([1, ...Array(DEPTH - 1).fill(0)]);
+  });
+
+  it("only within the fast window, and counts on per slot so each flash restarts", () => {
+    const next = bidsOf([["100.0", "5"], ["99.0", "5"], ...top.slice(2), ...dust]);
+    expect(flashes(next, [2, 0]).slice(0, 4)).toEqual([1, 1, 0, 0]);
+    const once = deriveBook(next, derive(before), opts, { before, live: [2, 0] });
+    expect(flashes(next, [2, 0], once).slice(0, 4)).toEqual([2, 2, 0, 0]);
+    expect(deriveBook(next, once, opts).bids[0].flash).toBe(1); // carried on when nothing changed
   });
 });
 

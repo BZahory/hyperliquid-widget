@@ -48,7 +48,7 @@ Where the perf-sensitive choices live:
 | Zero wasted renders | ≤ 1 commit per frame (~1.85/s, one per fast snapshot); header, controls and menus don't re-render in steady state. `Row.tsx` — `memo` with primitive props, so a row renders only when its props change (most do each tick: totals and the shared max move); `verify.mjs` counts Row fibers that rendered vs. whose props changed via the React DevTools commit hook |
 | Depth bars never trigger layout | `globals.css` `.bar` — `transform: scaleX()` with a 120 ms linear transition |
 | Zero layout shift | fixed 32 px rows (22 px below 900 px viewport height), fixed grid columns, `font-variant-numeric: tabular-nums` (checked in `verify.mjs`) |
-| Flashes restart without remounting | `Row.tsx` alternates `flash-up-a` / `flash-up-b` by `flashSeq` parity; state persists on the slot until the next change there |
+| Flashes cost no renders | `derive.ts` counts each slot's flashes into a number prop that changes only when the row's size or price does anyway; `Row.tsx` alternates two identical animations by its parity, so a new flash restarts without remounting. A tab switch clears the counts, so remounted rows don't replay them |
 | Exactly one `useEffect` | `OrderBook.tsx` — boots the idempotent data layer; symbol/precision/unit changes are plain actions |
 
 ## What the API actually does (measured on mainnet)
@@ -104,11 +104,14 @@ grouping and unit controls above the book) and then adds what a trader actually 
 - **Cumulative depth bars** scaled against one max shared by both sides, so a longer bid bar really
   means more resting size than the asks.
 - **Spread row** with absolute and percentage spread.
-- **Change flashes** on the size cell: green when size at a level grew (or a new level appeared
-  inside the range already shown), red when it shrank. Only the rows the fast feed refreshes can
-  flash: deeper rows change in ~5 s batches from the deep snapshot, so they update silently, as does
-  depth that merely scrolls into view. One-shot; a finished flash is never re-triggered by
-  unrelated renders.
+- **Change flashes**: a level whose size at least doubles or halves (or that appears) by at least
+  two average levels of its side lights its whole row in its side's colour, fading out over 250 ms.
+  Replaying 18 min of mainnet (six BTC and ETH recordings), any change would flash 7–9 of the 10
+  fast rows per frame, and doubling or halving alone 2.5–6.5, since a dust order at a new price is a
+  100% change; with the size floor it is 0.15–1.2 per frame (a busy minute of BTC live: ~1.5), each
+  fast row every ~4–30 s. Only the fast top-5 flash (deeper rows change in ~5 s batches, which is
+  batching, not news), and never on a first snapshot, a tab or market switch, a reconnect, or a
+  level that merely scrolled into view.
 - Depth bars and totals follow the selected unit (base asset or USD notional).
 - **Sweep highlight** on hover: every level between the touch and the cursor lights up, i.e. what a
   market order of that depth would eat. Pure CSS (`:hover ~` for asks, `:has(~ :hover)` for bids).
@@ -141,7 +144,7 @@ grouping and unit controls above the book) and then adds what a trader actually 
 ## Verification
 
 `pnpm verify` drives Chromium against live mainnet and checks: the book renders and visibly
-updates; flashes appear; memoized rows render only when their props change; digits are tabular and
+updates; changed rows flash, about one per frame, and not on a tab or market switch; memoized rows render only when their props change; digits are tabular and
 rows share one height; the precision dropdown regroups prices; switching symbol clears old rows
 synchronously and shows the new book; menus close on outside click; keyboard selection works; DevTools-style offline → status
 `offline` → online → status `live` and data resumes without reload; zero console errors.

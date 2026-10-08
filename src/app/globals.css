@@ -110,8 +110,21 @@
     background: rgba(255, 255, 255, 0.09);
   }
 
-  /* Two identical keyframe sets per direction: alternating the animation name restarts it on
-     consecutive changes without remounting. */
+  /* A large change at a level; two identical animations alternate so a flash restarts without remounting. */
+  .ask {
+    --flash: color-mix(in srgb, var(--color-ask) 40%, transparent);
+  }
+  .bid {
+    --flash: color-mix(in srgb, var(--color-bid) 40%, transparent);
+  }
+  .flash-a {
+    animation: flash-a 250ms linear;
+  }
+  .flash-b {
+    animation: flash-b 250ms linear;
+  }
+
+  /* A new fill: two identical keyframe sets per direction, alternated the same way. */
   .flash-up-a > .sz { animation: flash-up-a 420ms ease-out; }
   .flash-up-b > .sz { animation: flash-up-b 420ms ease-out; }
   .flash-down-a > .sz { animation: flash-down-a 420ms ease-out; }
@@ -144,6 +157,12 @@
   }
 }
 
+@keyframes flash-a {
+  from { background-color: var(--flash); }
+}
+@keyframes flash-b {
+  from { background-color: var(--flash); }
+}
 @keyframes flash-up-a {
   from { background-color: color-mix(in srgb, var(--color-bid) 40%, transparent); color: #fff; }
 }

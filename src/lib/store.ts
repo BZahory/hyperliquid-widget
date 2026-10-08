@@ -1,8 +1,8 @@
 import { createStore } from "zustand/vanilla";
 import { ASSETS, type Coin } from "./assets";
-import { DEPTH, deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, mergeSnapshots, prependTrades, type Derived } from "./derive";
+import { DEPTH, deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, mergeSnapshots, prependTrades } from "./derive";
 import { onStatus, start, subscribe, type Status } from "./socket";
-import type { DisplayBook, Flash, NSigFigs, TradeSlot, WireL2Book, WireTrade } from "./types";
+import type { DisplayBook, NSigFigs, Slot, TradeSlot, WireL2Book, WireTrade } from "./types";
 
 export type Tab = "orders" | "trades";
 
@@ -37,8 +37,9 @@ let deep: WireL2Book | null = null;
 /** Last merged book. Between deep snapshots each fast frame merges onto this, not onto `deep`, so a
  *  level leaving the fast window keeps its last fast size instead of reverting to an older deep one. */
 let merged: WireL2Book | null = null;
+/** The snapshot on screen, compared with the next one for flashes. */
+let shown: WireL2Book | null = null;
 let bookDirty = false;
-let derived: Derived | null = null;
 let recent: WireTrade[] = [];
 let fresh = 0;
 let tradesDirty = false;
@@ -73,16 +74,16 @@ function refill() {
 }
 
 function commit() {
-  const { coin, nSigFigs, quote, trades } = store.getState();
+  const { coin, nSigFigs, quote, book, trades } = store.getState();
   const { szDecimals } = ASSETS[coin];
   const patch: Partial<BookState> = {};
   const snap = bookDirty ? (merged = mergeSnapshots(fast, merged ?? deep)) : null;
   if (snap) {
     if (snap.levels[0].length < DEPTH || snap.levels[1].length < DEPTH) refill();
-    const fastLen: [number, number] | undefined = fast ? [fast.levels[0].length, fast.levels[1].length] : undefined;
-    derived = deriveBook(snap, derived, { szDecimals, nSigFigs, quote }, fastLen);
-    patch.book = derived.book;
+    const live: [number, number] = [fast?.levels[0].length ?? 0, fast?.levels[1].length ?? 0];
+    patch.book = deriveBook(snap, book, { szDecimals, nSigFigs, quote }, shown && { before: shown, live });
     patch.loading = false;
+    shown = snap;
   }
   if (tradesDirty) {
     patch.trades = deriveTrades(recent, fresh, trades, { szDecimals, quote });
@@ -104,7 +105,7 @@ function schedule() {
 /** Swap the book subscriptions to the current (coin, nSigFigs); what arrives next is a clean baseline. */
 function resubscribeBook() {
   stopBook?.();
-  fast = deep = merged = derived = null;
+  fast = deep = merged = shown = null;
   bookDirty = false;
   const { coin, nSigFigs } = store.getState();
   const stopFast = subscribe({ type: "l2Book", coin, nSigFigs, fast: true }, (d) => {
@@ -147,7 +148,7 @@ export function boot() {
     // Never merge snapshots from before and after a disconnect (the deep buffer could be minutes old
     // after sleep). The last book stays on screen, dimmed, until new data arrives.
     if (status !== "live") {
-      fast = deep = merged = derived = null;
+      fast = deep = merged = shown = null;
       recent = [];
       fresh = 0;
     }
@@ -182,13 +183,12 @@ export function setQuote(quote: boolean) {
   schedule();
 }
 
-const quiet = <T extends { flash: Flash; flashSeq: number }>(s: T): T => (s.flashSeq ? { ...s, flash: "", flashSeq: 0 } : s);
+const quiet = (slot: Slot) => (slot.flash ? { ...slot, flash: 0 } : slot);
+const quietTrade = (slot: TradeSlot) => (slot.flashSeq ? { ...slot, flash: "" as const, flashSeq: 0 } : slot);
 
-/** Switching tabs remounts the panel's rows, which would replay every slot's last flash: clear them. */
+/** Tab switches remount the rows, which would replay their last flash: clear them. */
 export function setTab(tab: Tab) {
   const { tab: current, book, trades } = store.getState();
   if (tab === current) return;
-  const quietBook = { ...book, asks: book.asks.map(quiet), bids: book.bids.map(quiet) };
-  if (derived) derived = { ...derived, book: quietBook };
-  store.setState({ tab, book: quietBook, trades: trades.map(quiet) });
+  store.setState({ tab, book: { ...book, asks: book.asks.map(quiet), bids: book.bids.map(quiet) }, trades: trades.map(quietTrade) });
 }
