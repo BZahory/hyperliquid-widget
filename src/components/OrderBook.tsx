@@ -144,12 +144,14 @@ function Controls() {
   const tick = useStore(store, (s) => s.book.tick);
   const groupings = useStore(store, (s) => s.book.groupings);
   const live = useStore(store, (s) => s.status === "live");
+  // An nSigFigs that isn't offered has full precision's step.
+  const value = groupings.some((g) => g.value === nSigFigs) ? nSigFigs : null;
   return (
     <div className="flex items-center justify-between px-5 pt-3 text-sm">
       {tab === "orders" ? (
         <Select
           label="Price grouping"
-          value={nSigFigs}
+          value={value}
           options={groupings}
           onChange={setPrecision}
           display={tick || "—"}

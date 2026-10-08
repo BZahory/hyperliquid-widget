@@ -60,6 +60,9 @@ Where the perf-sensitive choices live:
 - `subscriptionResponse` echoes a *normalised* subscription (adds `mantissa: null`, `fast: false`),
   so ACKs are matched on our own fields, never deep-equal. A duplicate subscribe returns an
   `error` channel message.
+- **`nSigFigs` accepts 2–5** or omission (full precision); 1 and 6 are rejected. All work on the
+  fast, deep and HTTP paths for BTC and ETH. At current prices 5 returns the same levels as full
+  precision, plus a `spread` field.
 - **Two cadences.** The default subscription sends 20 levels per side but only every ~5 s. The
   [documented](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions)
   `fast: true` option sends ~2 snapshots per second but only the top 5 levels per side. The
@@ -109,12 +112,13 @@ grouping and unit controls above the book) and then adds what a trader actually 
 - Depth bars and totals follow the selected unit (base asset or USD notional).
 - **Sweep highlight** on hover: every level between the touch and the cursor lights up, i.e. what a
   market order of that depth would eat. Pure CSS (`:hover ~` for asks, `:has(~ :hover)` for bids).
-- **Grouping as price steps.** The control above the book shows the current step (e.g. `10`) and the dropdown lists
-  the `nSigFigs` options by the step each produces at the current price — at current prices
-  `1,000 · 100 · 10 · 1 (full precision)` for BTC, `100 · 10 · 1 · 0.1 (full precision)` for ETH — derived from
-  Hyperliquid's tick rules (≤5 significant figures, ≤ 6 − szDecimals decimals, integers always
-  allowed). Options that would not be coarser than full precision are left out. Sizes can be
-  shown in USD or the base asset.
+- **Grouping as price steps.** The control above the book shows the current step (e.g. `10`) and
+  the dropdown lists the `nSigFigs` options (2–5, then full precision) by the step each produces at
+  the current price, derived from Hyperliquid's tick rules (≤5 significant figures, ≤ 6 − szDecimals
+  decimals, integers always allowed): at current prices `1,000 · 100 · 10 · 1` for BTC and
+  `100 · 10 · 1 · 0.1` for ETH. Each step is listed once: where 5 gives the same step as full
+  precision (it does for both today), it is the same book, so only full precision is offered. Sizes
+  can be shown in USD or the base asset.
 - **Trades tab**: the most recent fills, newest first, price coloured by taker side, with a flash on
   each new fill.
 - Loading skeleton on every switch, a status dot by the market name (connecting / live /

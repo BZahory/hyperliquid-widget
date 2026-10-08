@@ -28,7 +28,7 @@ export interface WireTrade {
   tid: number;
 }
 
-/** `nSigFigs` of the l2Book subscription; null = full precision. */
+/** `nSigFigs` of the l2Book subscription (the API rejects 1 and 6); null = full precision. */
 export type NSigFigs = null | 5 | 4 | 3 | 2;
 
 /** Display shapes: preformatted strings and 0..1 ratios; components never parse or format. */
@@ -45,12 +45,10 @@ export interface Slot {
   flashSeq: number;
 }
 
-/** A precision option labelled by the price step it produces at the current price. */
+/** A grouping option labelled by its price step. */
 export interface Grouping {
   value: NSigFigs;
   label: string;
-  /** The bare price step, e.g. "1" for "1 (full precision)". */
-  step: string;
 }
 
 export interface TradeSlot {
@@ -72,6 +70,6 @@ export interface DisplayBook {
   spreadPct: string;
   /** Price step of the current grouping. */
   tick: string;
-  /** Coarse → fine, ending with full precision; options no coarser than full precision are left out. */
+  /** Coarse → fine, each step once. */
   groupings: Grouping[];
 }

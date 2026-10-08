@@ -127,7 +127,7 @@ const rowHeights = await page.$$eval('[data-testid="book"] .row', (rows) =>
 );
 check("all book rows share one fixed height", rowHeights.length === 1, `${rowHeights.join(", ")}px`);
 
-// Options are labelled by price step, coarse → fine; pick the coarsest and check every price sits on it.
+// Pick the coarsest step and check every price sits on it.
 const visibleTick = () => page.getByRole("combobox", { name: "Price grouping" }).locator("span").first().textContent();
 const tickBefore = await visibleTick();
 await page.getByRole("combobox", { name: "Price grouping" }).click();
@@ -139,7 +139,7 @@ const grouped = await prices();
 const offGrid = grouped.filter((p) => Math.abs(p / coarseStep - Math.round(p / coarseStep)) > 1e-9);
 check(
   "precision change regroups prices",
-  labels.length >= 2 && labels.at(-1).includes("(full precision)") && offGrid.length === 0,
+  labels.length >= 2 && new Set(labels).size === labels.length && !labels.some((l) => /precision/i.test(l)) && offGrid.length === 0,
   `options [${labels.join(" · ")}]; tick ${tickBefore} → ${await visibleTick()}${offGrid.length ? `; off-grid: ${offGrid.join(" ")}` : ""}`,
 );
 
@@ -179,14 +179,15 @@ const grouping = page.getByRole("combobox", { name: "Price grouping" });
 const tickCoarse = Number((await visibleTick()).replace(/,/g, ""));
 await grouping.focus();
 await page.keyboard.press("ArrowDown"); // opens
+const finest = (await page.getByRole("option").allTextContents()).at(-1);
 await page.keyboard.press("End");
 await page.keyboard.press("Enter");
 await page.waitForFunction(
-  () => {
+  (finest) => {
     const el = document.querySelector('[role="combobox"][aria-label="Price grouping"]');
-    return el?.textContent.includes("(full precision)") && el.getAttribute("aria-expanded") === "false";
+    return el?.querySelector("span")?.textContent === finest && el.getAttribute("aria-expanded") === "false";
   },
-  null,
+  finest,
   { polling: 100, timeout: 10_000 },
 );
 await waitForLevels();

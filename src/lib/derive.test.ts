@@ -69,31 +69,25 @@ describe("deriveBook", () => {
     expect(derive(snap([["2568.0", "1"]], [["2568.0", "1"]]), null, eth).book.tick).toBe("0.1");
     expect(derive(snap([["2568.0", "1"]], [["2568.0", "1"]]), null, { ...eth, nSigFigs: 3 }).book.tick).toBe("10");
     expect(derive(snap([["123456.0", "1"]], [["123457.0", "1"]])).book.tick).toBe("1"); // integers always allowed
+    expect(derive(snap([["123456.0", "1"]], [["123457.0", "1"]]), null, { ...opts, nSigFigs: 5 }).book.tick).toBe("10");
   });
 
-  it("labels precision options by price step, cut off at full precision, and reuses the array when unchanged", () => {
+  it("labels precision options by price step, lists each step once, and reuses the array when unchanged", () => {
+    // At ~83k, nSigFigs 5 and full precision are both 1, so only full precision is offered.
     const btc = derive(snap([["83452.0", "1"]], [["83453.0", "1"]]));
     expect(btc.book.groupings).toEqual([
-      { value: 2, label: "1,000", step: "1,000" },
-      { value: 3, label: "100", step: "100" },
-      { value: 4, label: "10", step: "10" },
-      { value: null, label: "1 (full precision)", step: "1" },
+      { value: 2, label: "1,000" },
+      { value: 3, label: "100" },
+      { value: 4, label: "10" },
+      { value: null, label: "1" },
     ]);
-    const again = derive(snap([["83450.0", "1"]], [["83451.0", "1"]]), btc);
-    expect(again.book.groupings).toBe(btc.book.groupings);
+    expect(derive(snap([["83450.0", "1"]], [["83451.0", "1"]]), btc).book.groupings).toBe(btc.book.groupings);
     const eth: DeriveOptions = { szDecimals: 4, nSigFigs: null, quote: false };
-    expect(derive(snap([["2568.1", "1"]], [["2568.2", "1"]]), null, eth).book.groupings.map((g) => g.label)).toEqual([
-      "100",
-      "10",
-      "1",
-      "0.1 (full precision)",
-    ]);
-    expect(derive(snap([["999.95", "1"]], [["999.96", "1"]]), null, eth).book.groupings.map((g) => g.label)).toEqual([
-      "10",
-      "1",
-      "0.1",
-      "0.01 (full precision)",
-    ]);
+    const labels = (bid: string, ask: string, o = eth) => derive(snap([[bid, "1"]], [[ask, "1"]]), null, o).book.groupings.map((g) => g.label);
+    expect(labels("2568.1", "2568.2")).toEqual(["100", "10", "1", "0.1"]);
+    expect(labels("999.95", "999.96")).toEqual(["10", "1", "0.1", "0.01"]);
+    // Above 100k, nSigFigs 5 and full precision diverge, so both are offered.
+    expect(labels("123456.0", "123457.0", opts)).toEqual(["10,000", "1,000", "100", "10", "1"]);
   });
 
   it("formats a dot-less wire price", () => {

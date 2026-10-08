@@ -67,17 +67,15 @@ function tickOf(price: number, nSigFigs: NSigFigs, szDecimals: number): number {
 
 const fmtTick = (tick: number) => fmt(tick, Math.max(0, -Math.round(Math.log10(tick))));
 
-/** Precision options labelled by price step, coarse → fine, ending with full precision. Reuses the
- *  previous array when unchanged so the grouping control only re-renders when the price crosses a power of ten. */
+/** Grouping options by step, coarse → fine, each step once; reuses `prev` when unchanged to avoid renders. */
 function groupingsAt(price: number, szDecimals: number, prev: Grouping[] | undefined): Grouping[] {
   const full = tickOf(price, null, szDecimals);
   const next: Grouping[] = [];
   for (const n of [2, 3, 4, 5] as const) {
     const tick = tickOf(price, n, szDecimals);
-    if (tick > full) next.push({ value: n, label: fmtTick(tick), step: fmtTick(tick) });
+    if (tick > full) next.push({ value: n, label: fmtTick(tick) });
   }
-  const step = fmtTick(full);
-  next.push({ value: null, label: `${step} (full precision)`, step });
+  next.push({ value: null, label: fmtTick(full) });
   const same = prev?.length === next.length && next.every((g, i) => g.label === prev[i].label);
   return same ? prev : next;
 }
