@@ -1,18 +1,16 @@
 "use client";
 
-import { useEffect, type KeyboardEvent } from "react";
+import { useEffect, type CSSProperties, type KeyboardEvent } from "react";
 import { useStore } from "zustand";
-import { boot, MARKETS, setCoin, setPrecision, setQuote, setTab, store, type Tab } from "@/lib/store";
+import { ASSETS, COINS, type Coin } from "@/lib/assets";
+import { boot, setCoin, setPrecision, setQuote, setTab, store, type Tab } from "@/lib/store";
 import type { Status } from "@/lib/socket";
-import type { Coin } from "@/lib/types";
 import { Book } from "./Book";
+import { CoinIcon } from "./CoinIcon";
 import { Select, type Option } from "./Select";
 import { Trades } from "./Trades";
 
-const MARKET_OPTIONS: readonly Option<Coin>[] = [
-  { value: "BTC", label: "BTC-USD" },
-  { value: "ETH", label: "ETH-USD" },
-];
+const MARKET_OPTIONS: readonly Option<Coin>[] = COINS.map((coin) => ({ value: coin, label: ASSETS[coin].label }));
 
 const TABS: readonly { id: Tab; label: string }[] = [
   { id: "orders", label: "Orders" },
@@ -29,9 +27,10 @@ const STATUS_LABEL: Record<Status, string> = {
 export function OrderBook() {
   // The app's only effect; boot is idempotent, so StrictMode's double call is harmless.
   useEffect(boot, []);
+  const coin = useStore(store, (s) => s.coin);
 
   return (
-    <div className="flex w-full max-w-[440px] flex-col gap-4">
+    <div className="flex w-full max-w-[440px] flex-col gap-4" style={{ "--asset": ASSETS[coin].color } as CSSProperties}>
       <Header />
       <section className="card">
         <Tabs />
@@ -47,23 +46,16 @@ function Header() {
   const status = useStore(store, (s) => s.status);
   return (
     <header className="card flex items-center gap-3 px-4 py-3">
-      <span
-        aria-hidden="true"
-        className={`flex size-10 items-center justify-center rounded-full text-lg font-bold text-[#0f1113] ${
-          coin === "BTC" ? "bg-accent" : "bg-[#8ea0ff]"
-        }`}
-      >
-        {coin === "BTC" ? "₿" : "Ξ"}
-      </span>
+      <CoinIcon coin={coin} />
       <div className="flex flex-col gap-0.5">
         <div className="flex items-center gap-2">
-          <h1 className="text-xl font-semibold leading-tight">{coin}-USD</h1>
+          <h1 className="text-xl font-semibold leading-tight">{ASSETS[coin].label}</h1>
           <StatusDot status={status} />
         </div>
         <span className="text-sm text-muted">Perpetuals</span>
       </div>
       <span className="ml-auto rounded-md bg-[#1b1e21] px-2.5 py-1.5 text-sm" title="Max leverage">
-        {MARKETS[coin].maxLeverage}×
+        {ASSETS[coin].maxLeverage}×
       </span>
       <Select
         label="Market"

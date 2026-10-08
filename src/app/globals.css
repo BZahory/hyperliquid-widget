@@ -7,7 +7,9 @@
   --color-line: #24272b;
   --color-ink: #ececec;
   --color-muted: #8b8f96;
-  --color-accent: #f7931a;
+  /* Set per asset on the widget root (assets.ts); lightened for AA text on menus. */
+  --color-accent: var(--asset);
+  --color-accent-text: color-mix(in srgb, var(--asset) 80%, white);
   --color-bid: #1fa67d;
   --color-ask: #ed7088;
   --color-warn: #f5a623;

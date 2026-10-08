@@ -137,7 +137,7 @@ export function Select<T extends string | number | null>({
               onMouseMove={() => setActive(i)}
               onClick={() => choose(i)}
               className={`cursor-pointer whitespace-nowrap px-3 py-1.5 ${i === at ? "bg-white/8" : ""} ${
-                i === selected ? "text-accent" : i === at ? "text-white" : ""
+                i === selected ? "text-accent-text" : i === at ? "text-white" : ""
               }`}
             >
               {o.label}

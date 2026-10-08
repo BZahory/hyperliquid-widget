@@ -145,6 +145,6 @@ synchronously and shows the new book; menus close on outside click; keyboard sel
 ## Next steps
 
 - Mark deep rows that are older than the fast top-5 (a subtle text dim).
-- Fetch `szDecimals` and max leverage from the `meta` endpoint to support any coin instead of a
-  two-entry table. On mainnet today BTC and ETH perps exist only on the main dex; the HIP-3 dex
-  listings (hyna, cash, flx) are delisted, so the market menu lists the two main-dex markets.
+- Check `src/lib/assets.ts`'s `szDecimals` and max leverage against the `meta` endpoint in CI. The
+  asset list is permissioned: adding a symbol is an entry there plus its mark in `CoinIcon` (a type
+  error until both exist), and its menu entry follows.

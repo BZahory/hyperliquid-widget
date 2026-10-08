@@ -1,13 +1,8 @@
 import { createStore } from "zustand/vanilla";
+import { ASSETS, type Coin } from "./assets";
 import { DEPTH, deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, mergeSnapshots, prependTrades, type Derived } from "./derive";
 import { onStatus, start, subscribe, type Status } from "./socket";
-import type { Coin, DisplayBook, Flash, NSigFigs, TradeSlot, WireL2Book, WireTrade } from "./types";
-
-/** Per-market constants from the `meta` endpoint (size decimals and max leverage). */
-export const MARKETS: Record<Coin, { szDecimals: number; maxLeverage: number }> = {
-  BTC: { szDecimals: 5, maxLeverage: 40 },
-  ETH: { szDecimals: 4, maxLeverage: 25 },
-};
+import type { DisplayBook, Flash, NSigFigs, TradeSlot, WireL2Book, WireTrade } from "./types";
 
 export type Tab = "orders" | "trades";
 
@@ -79,7 +74,7 @@ function refill() {
 
 function commit() {
   const { coin, nSigFigs, quote, trades } = store.getState();
-  const { szDecimals } = MARKETS[coin];
+  const { szDecimals } = ASSETS[coin];
   const patch: Partial<BookState> = {};
   const snap = bookDirty ? (merged = mergeSnapshots(fast, merged ?? deep)) : null;
   if (snap) {

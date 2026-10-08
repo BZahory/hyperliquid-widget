@@ -28,7 +28,6 @@ export interface WireTrade {
   tid: number;
 }
 
-export type Coin = "BTC" | "ETH";
 /** `nSigFigs` of the l2Book subscription; null = full precision. */
 export type NSigFigs = null | 5 | 4 | 3 | 2;
 
