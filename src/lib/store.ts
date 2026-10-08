@@ -199,6 +199,9 @@ function resubscribeTrades() {
 
 let booted = false;
 
+// Dev only: Fast Refresh can't carry the live socket into a re-run module, so reload the page instead.
+import.meta.turbopackHot?.decline();
+
 export function boot() {
   if (booted) return;
   booted = true;
