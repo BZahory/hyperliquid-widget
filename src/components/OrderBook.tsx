@@ -178,12 +178,7 @@ function Controls({ coin }: { coin: Coin }) {
   return (
     <div className="flex items-center justify-between border-t border-line px-5 py-3 text-sm">
       {tab === "orders" ? (
-        <div className="flex items-center gap-2">
-          <span className="text-muted" aria-hidden="true">
-            Grouping
-          </span>
-          <Select label="Price grouping" value={value} options={groupings} onChange={setPrecision} display={tick || "—"} drop="up" />
-        </div>
+        <Select label="Price grouping" value={value} options={groupings} onChange={setPrecision} display={tick || "—"} drop="up" />
       ) : (
         <span />
       )}
