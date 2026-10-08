@@ -12,15 +12,14 @@ interface SelectProps<T> {
   value: T;
   options: readonly Option<T>[];
   onChange: (value: T) => void;
-  /** Visible text for the closed control instead of the selected label (which stays exposed to AT). */
+  /** Visible text for the closed control; the selected label stays exposed to AT. */
   display?: string;
   /** Icon-only trigger; the selected label stays exposed to AT. */
   icon?: ReactNode;
   align?: "left" | "right";
 }
 
-/** WAI-ARIA select-only combobox: focus stays on the button, aria-activedescendant tracks the active
- *  option, arrows/Home/End move, Enter/Space/Tab pick, Escape or blur closes. No effects needed. */
+/** WAI-ARIA select-only combobox: focus stays on the button, aria-activedescendant tracks the option. */
 export function Select<T extends string | number | null>({
   label,
   value,
@@ -34,13 +33,15 @@ export function Select<T extends string | number | null>({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const selected = options.findIndex((o) => o.value === value);
+  // Options can shrink while open; never point past the end.
+  const at = Math.min(active, options.length - 1);
 
   const show = () => {
     setActive(Math.max(selected, 0));
     setOpen(true);
   };
   const choose = (index: number) => {
-    onChange(options[index].value);
+    if (index >= 0 && index !== selected) onChange(options[index].value);
     setOpen(false);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
@@ -51,7 +52,7 @@ export function Select<T extends string | number | null>({
         else show();
         break;
       case "ArrowUp":
-        if (open) setActive((a) => Math.max(a - 1, 0));
+        if (open) setActive(Math.max(at - 1, 0));
         else show();
         break;
       case "Home":
@@ -64,14 +65,14 @@ export function Select<T extends string | number | null>({
         break;
       case "Enter":
       case " ":
-        if (open) choose(active);
+        if (open) choose(at);
         else show();
         break;
       case "Escape":
         setOpen(false);
         break;
       case "Tab":
-        if (open) choose(active); // APG select-only combobox: Tab commits, then focus moves on
+        if (open) choose(at); // APG select-only combobox: Tab commits, then focus moves on
         return;
       default:
         return;
@@ -91,8 +92,8 @@ export function Select<T extends string | number | null>({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={id}
-        aria-activedescendant={open ? `${id}-${active}` : undefined}
-        // WebKit neither focuses a clicked button nor tabs to one without this, so onBlur would never close.
+        aria-activedescendant={open && at >= 0 ? `${id}-${at}` : undefined}
+        // WebKit won't focus a clicked button without this, so onBlur would never close.
         tabIndex={0}
         disabled={options.length === 0}
         onClick={() => (open ? setOpen(false) : show())}
@@ -120,6 +121,8 @@ export function Select<T extends string | number | null>({
           role="listbox"
           id={id}
           aria-label={label}
+          // Tab commits the active option, so reset it when the pointer leaves.
+          onMouseLeave={() => setActive(Math.max(selected, 0))}
           className={`absolute top-full z-10 mt-2 min-w-full overflow-hidden rounded-lg border border-line bg-[#17191c] py-1 text-sm shadow-xl ${
             align === "right" ? "right-0" : "left-0"
           }`}
@@ -133,8 +136,8 @@ export function Select<T extends string | number | null>({
               onMouseDown={(e) => e.preventDefault()}
               onMouseMove={() => setActive(i)}
               onClick={() => choose(i)}
-              className={`cursor-pointer whitespace-nowrap px-3 py-1.5 ${i === active ? "bg-white/8" : ""} ${
-                i === selected ? "text-accent" : i === active ? "text-white" : ""
+              className={`cursor-pointer whitespace-nowrap px-3 py-1.5 ${i === at ? "bg-white/8" : ""} ${
+                i === selected ? "text-accent" : i === at ? "text-white" : ""
               }`}
             >
               {o.label}
