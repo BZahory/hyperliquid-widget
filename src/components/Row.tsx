@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type MouseEvent } from "react";
 import type { Slot } from "@/lib/types";
 
 export type RowKind = "level" | "empty" | "skeleton";
@@ -9,6 +9,9 @@ type RowProps = Slot & {
   /** Selected unit, for the tooltip's label. */
   unit: string;
 };
+
+/** A click focuses the row; drop that so the highlight follows the mouse. */
+export const unpin = (e: MouseEvent<HTMLElement>) => e.currentTarget.blur();
 
 /** One fixed slot with primitive props, so unchanged rows skip the render; the tooltip is shown by CSS. */
 export const Row = memo(function Row({ side, kind, unit, px, sz, total, ratio, pxFull, szFull, totalFull, avg, flash }: RowProps) {

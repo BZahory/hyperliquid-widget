@@ -1,6 +1,6 @@
 import { createStore } from "zustand/vanilla";
 import { ASSETS, type Coin } from "./assets";
-import { DEPTH, deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, mergeSnapshots, prependTrades } from "./derive";
+import { DEPTH, deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, HISTORY, mergeSnapshots, prependTrades, TRADES } from "./derive";
 import { onStatus, start, subscribe, type Status } from "./socket";
 import type { DisplayBook, NSigFigs, Slot, TradeSlot, WireL2Book, WireTrade } from "./types";
 
@@ -17,6 +17,8 @@ interface BookState {
   loading: boolean;
   book: DisplayBook;
   trades: TradeSlot[];
+  /** The trades list's first row in view. */
+  tradesTop: number;
 }
 
 export const store = createStore<BookState>(() => ({
@@ -28,10 +30,10 @@ export const store = createStore<BookState>(() => ({
   loading: true,
   book: EMPTY_BOOK,
   trades: EMPTY_TRADES,
+  tradesTop: 0,
 }));
 
-// Latest-wins slots per book cadence plus a capped trade list, flushed by one rAF:
-// React never renders more than once per frame.
+// Latest-wins buffers flushed by one rAF, so React renders at most once per frame.
 let fast: WireL2Book | null = null;
 let deep: WireL2Book | null = null;
 /** Last merged book. Between deep snapshots each fast frame merges onto this, not onto `deep`, so a
@@ -41,8 +43,15 @@ let merged: WireL2Book | null = null;
 let shown: WireL2Book | null = null;
 let bookDirty = false;
 let recent: WireTrade[] = [];
+/** Fills received since the list started. */
+let count = 0;
+/** Fills at the head of `recent` not derived yet; `rederive` redoes the whole list. */
 let fresh = 0;
-let tradesDirty = false;
+let rederive = false;
+/** The trades list's first row in view after its last scroll, until the next commit. */
+let scrolled: number | null = null;
+/** A trades row has focus: fills move the view as if scrolled, so it stays in the DOM. */
+let held = false;
 let raf = 0;
 let stopBook: (() => void) | null = null;
 let stopTrades: (() => void) | null = null;
@@ -74,7 +83,7 @@ function refill() {
 }
 
 function commit() {
-  const { coin, nSigFigs, quote, book, trades } = store.getState();
+  const { coin, nSigFigs, quote, book, trades, tradesTop } = store.getState();
   const { szDecimals } = ASSETS[coin];
   const patch: Partial<BookState> = {};
   const snap = bookDirty ? (merged = mergeSnapshots(fast, merged ?? deep)) : null;
@@ -85,12 +94,20 @@ function commit() {
     patch.loading = false;
     shown = snap;
   }
-  if (tradesDirty) {
-    patch.trades = deriveTrades(recent, fresh, trades, { szDecimals, quote });
-    fresh = 0;
+  let top = scrolled ?? tradesTop;
+  if (fresh || rederive) {
+    const opts = { szDecimals, quote };
+    const list = (patch.trades = rederive
+      ? deriveTrades(recent, count - 1, opts)
+      : deriveTrades(recent.slice(0, fresh), count - 1, opts).concat(trades).slice(0, HISTORY));
+    // Scrolled down or holding focus, the view moves with prepended fills so the rows being read stay put.
+    if (top || held) top = Math.min(top + fresh, Math.max(0, list.length - TRADES));
   }
-  bookDirty = tradesDirty = false;
-  if (patch.book || patch.trades) store.setState(patch);
+  if (top !== tradesTop) patch.tradesTop = top;
+  bookDirty = rederive = false;
+  fresh = 0;
+  scrolled = null;
+  if (patch.book || patch.trades || patch.tradesTop !== undefined) store.setState(patch);
 }
 
 function flush() {
@@ -128,13 +145,16 @@ function resubscribeBook() {
 function resubscribeTrades() {
   stopTrades?.();
   recent = [];
-  fresh = 0;
-  tradesDirty = false;
+  count = fresh = 0;
+  rederive = false;
+  scrolled = null;
   stopTrades = subscribe({ type: "trades", coin: store.getState().coin }, (batch) => {
-    // The first batch after (re)subscribing is history, not news: render it without flashes.
-    if (recent.length) fresh += batch.length;
+    // tid keys the row, so never list a fill twice.
+    const listed = new Set(recent.map((t) => t.tid));
+    batch = batch.filter((t) => !listed.has(t.tid));
     recent = prependTrades(recent, batch);
-    tradesDirty = true;
+    count += batch.length;
+    fresh += batch.length;
     schedule();
   });
 }
@@ -150,7 +170,8 @@ export function boot() {
     if (status !== "live") {
       fast = deep = merged = shown = null;
       recent = [];
-      fresh = 0;
+      count = fresh = 0;
+      rederive = true;
     }
     store.setState({ status });
   });
@@ -162,7 +183,7 @@ export function boot() {
 /** The grouping menu stays empty until the new coin's first snapshot labels it. */
 export function setCoin(coin: Coin) {
   if (coin === store.getState().coin) return;
-  store.setState({ coin, loading: true, book: EMPTY_BOOK, trades: EMPTY_TRADES });
+  store.setState({ coin, loading: true, book: EMPTY_BOOK, trades: EMPTY_TRADES, tradesTop: 0 });
   resubscribeBook();
   resubscribeTrades();
 }
@@ -179,16 +200,24 @@ export function setPrecision(nSigFigs: NSigFigs) {
 export function setQuote(quote: boolean) {
   if (quote === store.getState().quote) return;
   store.setState({ quote });
-  bookDirty = tradesDirty = true;
+  bookDirty = rederive = true;
   schedule();
 }
 
+/** Applied in the next frame's commit, so scrolling while fills arrive still renders once per frame. */
+export function scrollTrades(top: number) {
+  scrolled = top;
+  schedule();
+}
+
+export function holdTrades(on: boolean) {
+  held = on;
+}
+
 const quiet = (slot: Slot) => (slot.flash ? { ...slot, flash: 0 } : slot);
-const quietTrade = (slot: TradeSlot) => (slot.flashSeq ? { ...slot, flash: "" as const, flashSeq: 0 } : slot);
 
 /** Tab switches remount the rows, which would replay their last flash: clear them. */
 export function setTab(tab: Tab) {
-  const { tab: current, book, trades } = store.getState();
-  if (tab === current) return;
-  store.setState({ tab, book: { ...book, asks: book.asks.map(quiet), bids: book.bids.map(quiet) }, trades: trades.map(quietTrade) });
+  const { tab: current, book } = store.getState();
+  if (tab !== current) store.setState({ tab, book: { ...book, asks: book.asks.map(quiet), bids: book.bids.map(quiet) } });
 }

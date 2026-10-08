@@ -1,5 +1,4 @@
-/** Wire shapes as Hyperliquid sends them: prices and sizes are strings (`n`, `time` are numbers),
- *  parsed in derive.ts. */
+/** Wire shapes as Hyperliquid sends them; prices and sizes are strings. */
 export interface WireLevel {
   px: string;
   sz: string;
@@ -9,15 +8,15 @@ export interface WireLevel {
 export interface WireL2Book {
   coin: string;
   time: number;
-  /** [bids descending, asks ascending] — a full snapshot every message. */
+  /** [bids descending, asks ascending]; every message is a full snapshot. */
   levels: [WireLevel[], WireLevel[]];
-  /** Present (true) only on messages from a `fast: true` subscription. */
+  /** Only on `fast: true` messages. */
   fast?: boolean;
-  /** Present only on grouped (`nSigFigs`) messages: the true full-precision spread. */
+  /** Only on grouped messages: the true spread. */
   spread?: string;
 }
 
-/** One fill from the `trades` channel. Batches arrive oldest → newest. */
+/** One fill; batches arrive oldest → newest. */
 export interface WireTrade {
   coin: string;
   /** "B" = buyer was the taker, "A" = seller was. */
@@ -25,6 +24,8 @@ export interface WireTrade {
   px: string;
   sz: string;
   time: number;
+  /** All zeros for TWAP and liquidation fills. */
+  hash: string;
   tid: number;
 }
 
@@ -54,25 +55,24 @@ export interface Grouping {
   label: string;
 }
 
-/** A fill's flash: its taker side. */
-type Flash = "" | "up" | "down";
-
 export interface TradeSlot {
+  /** The fill's `tid`, keying its row. */
+  id: number;
+  /** Arrival order; a row sits (newest seq − seq) rows down. */
+  seq: number;
   px: string;
   sz: string;
   time: string;
-  side: "buy" | "sell" | "";
+  side: "buy" | "sell";
   /** Full values for hover. */
   pxFull: string;
   szFull: string;
-  /** Set when a fresh trade lands here and kept as rows shift, so a shifted row never restarts it. */
-  flash: Flash;
-  /** Increments when a fresh trade lands in this slot, so only new fills animate, not shifted ones. */
-  flashSeq: number;
+  /** Explorer link, "" when the fill has no transaction. */
+  href: string;
 }
 
 export interface DisplayBook {
-  /** Exactly DEPTH slots each, index 0 = best price. Short sides are padded with empty slots. */
+  /** DEPTH slots each, index 0 = best price. */
   asks: Slot[];
   bids: Slot[];
   spread: string;

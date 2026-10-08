@@ -18,6 +18,14 @@
 @layer base {
   :root {
     color-scheme: dark;
+    /* Row height, shared by the book and the trades list. */
+    --row: 32px;
+  }
+  /* Short viewports: keep both sides and the controls above the fold. */
+  @media (max-height: 900px) {
+    :root {
+      --row: 22px;
+    }
   }
   body {
     background: var(--color-page);
@@ -39,17 +47,11 @@
     display: grid;
     grid-template-columns: 1.15fr 1fr 1fr;
     align-items: center;
-    height: 32px;
+    height: var(--row);
     padding: 0 20px;
     font-size: 14px;
     line-height: 1;
     isolation: isolate;
-  }
-  /* Short viewports: keep both sides and the controls above the fold. */
-  @media (max-height: 900px) {
-    .row {
-      height: 22px;
-    }
   }
   .row > span {
     position: relative;
@@ -76,6 +78,29 @@
   .ask > .px,
   .row > .px.sell {
     color: var(--color-ask);
+  }
+
+  /* The book's height; fills are placed by transform, so a new one shifts rows without layout. */
+  .trades {
+    height: calc(var(--row) * 25);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+  }
+  .fill {
+    position: absolute;
+    inset: 0 0 auto;
+    transform: translateY(calc(var(--row) * (var(--head) - var(--seq))));
+  }
+  /* Marks a fill that links to the explorer. */
+  a.row:focus-visible > .total::before {
+    content: "↗\00a0";
+  }
+  @media (hover: hover) {
+    a.row:hover > .total::before {
+      content: "↗\00a0";
+    }
   }
 
   /* Cumulative depth. scaleX only: compositor-driven, never layout. */

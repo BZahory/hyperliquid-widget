@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { DEPTH, deriveBook, deriveTrades, EMPTY_BOOK, EMPTY_TRADES, mergeSnapshots, prependTrades, TRADES, type DeriveOptions } from "./derive";
+import {
+  DEPTH,
+  deriveBook,
+  deriveTrades,
+  EMPTY_BOOK,
+  HISTORY,
+  mergeSnapshots,
+  prependTrades,
+  type DeriveOptions,
+} from "./derive";
 import type { DisplayBook, WireL2Book, WireLevel, WireTrade } from "./types";
 
 const level = (px: string, sz: string): WireLevel => ({ px, sz, n: 1 });
@@ -223,47 +232,43 @@ describe("mergeSnapshots", () => {
 });
 
 describe("trades", () => {
-  const trade = (px: string, sz: string, side: "A" | "B", time = 1_791_400_000_000): WireTrade => ({ coin: "BTC", side, px, sz, time, tid: time });
+  const hash = "0xfb5f323f3c5e7f10fcd804461f7c590207680024d7519de39f27dd91fb5258fb"; // a real BTC fill
+  const trade = (px: string, sz: string, side: "A" | "B", time = 1_791_400_000_000): WireTrade => ({ coin: "BTC", side, px, sz, time, hash, tid: time });
 
-  it("prepends a wire batch newest-first and caps the list at the visible rows", () => {
+  it("prepends a wire batch newest-first and caps the history", () => {
     const recent = prependTrades([trade("1.0", "1", "B", 1)], [trade("2.0", "1", "A", 2), trade("3.0", "1", "B", 3)]);
     expect(recent.map((t) => t.px)).toEqual(["3.0", "2.0", "1.0"]);
-    const many = Array.from({ length: TRADES + 5 }, (_, i) => trade(`${i}.0`, "1", "B", i));
-    expect(prependTrades([], many)).toHaveLength(TRADES);
+    const many = Array.from({ length: HISTORY + 5 }, (_, i) => trade(`${i}.0`, "1", "B", i));
+    expect(prependTrades([], many)).toHaveLength(HISTORY);
   });
 
-  it("formats trades, pads to TRADES slots, and flashes only the fresh leading slots", () => {
-    const recent = [trade("83452.0", "0.5", "B"), trade("83451.0", "0.25", "A")];
-    const first = deriveTrades(recent, 0, EMPTY_TRADES, { szDecimals: 5, quote: false });
-    expect(first).toHaveLength(TRADES);
-    expect(first[0]).toMatchObject({ px: "83,452", sz: "0.50000", side: "buy", pxFull: "83,452", szFull: "0.5", flashSeq: 0 });
-    expect(first[0].time).toMatch(/^\d{2}:\d{2}:\d{2}$/);
-    expect(first[1]).toMatchObject({ px: "83,451", sz: "0.25000", side: "sell", szFull: "0.25", flashSeq: 0 });
-    expect(first[2]).toMatchObject({ px: "", side: "" });
-
-    const next = deriveTrades([trade("83453.0", "1", "B"), ...recent], 1, first, { szDecimals: 5, quote: false });
-    expect(next[0]).toMatchObject({ px: "83,453", flashSeq: 1 });
-    expect(next[1]).toMatchObject({ px: "83,452", flashSeq: 0 }); // shifted, not fresh
+  it("formats one row per fill, keyed by tid, in arrival order, linking its transaction on the explorer", () => {
+    const slots = deriveTrades([trade("83452.0", "0.5", "B", 7), trade("83451.0", "0.25", "A", 8)], 41, { szDecimals: 5, quote: false });
+    expect(slots).toHaveLength(2);
+    expect(slots.map((s) => s.seq)).toEqual([41, 40]);
+    expect(slots[0]).toMatchObject({ id: 7, px: "83,452", sz: "0.50000", side: "buy", pxFull: "83,452", szFull: "0.5" });
+    expect(slots[0].href).toBe(`https://app.hyperliquid.xyz/explorer/tx/${hash}`);
+    expect(slots[0].time).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+    expect(slots[1]).toMatchObject({ id: 8, px: "83,451", sz: "0.25000", side: "sell", szFull: "0.25" });
   });
 
-  it("keeps a shifted row's flash direction, so a side change below the fresh fills never restarts it", () => {
-    const first = deriveTrades([trade("2.0", "1", "A"), trade("1.0", "1", "B")], 2, EMPTY_TRADES, { szDecimals: 5, quote: false });
-    expect(first.map((t) => t.flash).slice(0, 2)).toEqual(["down", "up"]);
-    const next = deriveTrades([trade("3.0", "1", "B"), trade("2.0", "1", "A"), trade("1.0", "1", "B")], 1, first, { szDecimals: 5, quote: false });
-    expect(next[0]).toMatchObject({ side: "buy", flash: "up", flashSeq: 2 });
-    expect(next[1]).toMatchObject({ side: "sell", flash: "up", flashSeq: 1 }); // shifted in, slot unchanged
+  it("links no transaction for a TWAP or liquidation fill (all-zero hash) or a malformed hash", () => {
+    const link = (h: string) => deriveTrades([{ ...trade("83452.0", "1", "B"), hash: h }], 0, { szDecimals: 5, quote: false })[0].href;
+    expect(link(`0x${"0".repeat(64)}`)).toBe("");
+    expect(link("0x12/../../evil")).toBe("");
   });
 
   it("formats trade prices at the tick's decimals", () => {
-    const eth = (...px: string[]) => deriveTrades(px.map((p, i) => ({ ...trade(p, "1", "B"), coin: "ETH", tid: i })), 0, EMPTY_TRADES, { szDecimals: 4, quote: false });
+    const eth = (...px: string[]) => deriveTrades(px.map((p, i) => ({ ...trade(p, "1", "B"), coin: "ETH", tid: i })), 0, { szDecimals: 4, quote: false });
     expect(eth("2569.0", "2570.0").slice(0, 2).map((s) => s.px)).toEqual(["2,569.0", "2,570.0"]);
     expect(eth("2569.9", "2570.0").slice(0, 2).map((s) => s.px)).toEqual(["2,569.9", "2,570.0"]);
   });
 
   it("shows trade sizes in quote currency when asked: rounded in the cell, exact on hover", () => {
-    const quote = (px: string, sz: string, szDecimals = 4) => deriveTrades([trade(px, sz, "B")], 0, EMPTY_TRADES, { szDecimals, quote: true })[0];
-    expect(quote("2568.7", "0.1234")).toMatchObject({ sz: "317", szFull: "316.97758" });
-    expect(quote("2569.1", "0.0001").sz).toBe("<1");
-    expect(quote("123456.7", "98765.43217", 5).szFull).toBe("12,193,254,329.782039"); // float: …329.78204
+    const [slot] = deriveTrades([trade("2568.7", "0.1234", "B")], 0, { szDecimals: 4, quote: true });
+    expect(slot).toMatchObject({ sz: "317", szFull: "316.97758" });
+    expect(deriveTrades([trade("2569.1", "0.0001", "B")], 0, { szDecimals: 4, quote: true })[0].sz).toBe("<1");
+    const [big] = deriveTrades([trade("123456.7", "98765.43217", "A")], 0, { szDecimals: 5, quote: true });
+    expect(big.szFull).toBe("12,193,254,329.782039"); // float: …329.78204
   });
 });

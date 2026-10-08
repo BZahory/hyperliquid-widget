@@ -2,8 +2,10 @@ import type { DisplayBook, Grouping, NSigFigs, Slot, TradeSlot, WireL2Book, Wire
 
 /** Rows per side, fixed so the DOM never changes shape. */
 export const DEPTH = 12;
-/** Rows in the trades tab: the same height as both sides of the book plus the spread row. */
+/** Trade rows in view: both book sides plus the spread row. */
 export const TRADES = DEPTH * 2 + 1;
+/** Fills kept for the trades tab: ~2 min of busy BTC. Each is formatted once, on arrival. */
+export const HISTORY = 500;
 /** A level flashes when its size changes by ≥ FLASH_PCT% and by ≥ FLASH_AVGS average levels of its side;
  *  the size floor keeps dust orders (a 100% change) from flashing every frame (see README). */
 const FLASH_PCT = 50n;
@@ -29,8 +31,7 @@ export const EMPTY_BOOK: DisplayBook = {
   groupings: [],
 };
 
-const EMPTY_TRADE: TradeSlot = { px: "", sz: "", time: "", side: "", pxFull: "", szFull: "", flash: "", flashSeq: 0 };
-export const EMPTY_TRADES: TradeSlot[] = Array<TradeSlot>(TRADES).fill(EMPTY_TRADE);
+export const EMPTY_TRADES: TradeSlot[] = [];
 
 /** Fixed-point scale for wire decimals (≤ 6 on the wire), so sums are exact; notionals are at 2 × SCALE. */
 const SCALE = 8;
@@ -234,38 +235,28 @@ export function deriveBook(snap: WireL2Book, prev: DisplayBook, opts: DeriveOpti
   return book;
 }
 
-/** Newest first, capped at the visible rows. `batch` is a wire message, oldest → newest. */
+/** Newest first, capped at HISTORY; `batch` arrives oldest → newest. */
 export function prependTrades(recent: readonly WireTrade[], batch: readonly WireTrade[]): WireTrade[] {
-  return batch.slice().reverse().concat(recent).slice(0, TRADES);
+  return batch.slice().reverse().concat(recent).slice(0, HISTORY);
 }
 
-/** Trades tab rows. Only the `fresh` leading slots (new since the last frame) get a new flash, so rows
- *  that merely shifted down do not re-animate. */
-export function deriveTrades(
-  recent: readonly WireTrade[],
-  fresh: number,
-  prev: readonly TradeSlot[],
-  opts: Pick<DeriveOptions, "szDecimals" | "quote">,
-): TradeSlot[] {
-  const slots = new Array<TradeSlot>(TRADES);
-  for (let i = 0; i < TRADES; i++) {
-    const t = recent[i];
-    if (!t) {
-      slots[i] = EMPTY_TRADE;
-      continue;
-    }
+/** A real tx hash; TWAP and liquidation fills carry an all-zero one the explorer can't show. */
+const TX = /^0x(?!0+$)[0-9a-f]{64}$/i;
+
+/** Trades tab rows, newest first; `fills[0]` gets seq `seq`. */
+export function deriveTrades(fills: readonly WireTrade[], seq: number, opts: Pick<DeriveOptions, "szDecimals" | "quote">): TradeSlot[] {
+  return fills.map((t, i) => {
     const value = toInt(t.sz) * toInt(t.px);
-    const isFresh = i < fresh;
-    slots[i] = {
+    return {
+      id: t.tid,
+      seq: seq - i,
       px: fmt(t.px as `${number}`, decimalsFrom(Number(t.px), null, opts.szDecimals)),
       sz: opts.quote ? usd(value) : fmt(t.sz as `${number}`, opts.szDecimals),
       time: timeFmt.format(t.time),
       side: t.side === "B" ? "buy" : "sell",
       pxFull: exact(t.px as `${number}`),
       szFull: exact(opts.quote ? toDec(value, 2 * SCALE) : (t.sz as `${number}`)),
-      flash: isFresh ? (t.side === "B" ? "up" : "down") : prev[i].flash,
-      flashSeq: isFresh ? prev[i].flashSeq + 1 : prev[i].flashSeq,
+      href: TX.test(t.hash) ? `https://app.hyperliquid.xyz/explorer/tx/${t.hash}` : "",
     };
-  }
-  return slots;
+  });
 }
