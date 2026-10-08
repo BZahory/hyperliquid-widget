@@ -137,18 +137,34 @@
     z-index: 1;
     pointer-events: none;
   }
-  .asks .row:is(:hover, :focus) ~ .row::after,
-  .bids .row:has(~ .row:is(:hover, :focus))::after {
+  .asks .row:focus ~ .row::after,
+  .bids .row:has(~ .row:focus)::after {
     background: rgba(255, 255, 255, 0.045);
   }
-  .row:is(:hover, :focus)::after {
+  .row:focus::after {
     background: rgba(255, 255, 255, 0.09);
   }
-  .row:is(:hover, :focus) {
+  .row:focus {
     z-index: 3;
   }
-  .row:is(:hover, :focus) > .tip {
+  .row:focus > .tip {
     display: grid;
+  }
+  /* Touch screens fake a sticky :hover on a row that's not the tapped (focused) one, so only real hovers count. */
+  @media (hover: hover) {
+    .asks .row:hover ~ .row::after,
+    .bids .row:has(~ .row:hover)::after {
+      background: rgba(255, 255, 255, 0.045);
+    }
+    .row:hover::after {
+      background: rgba(255, 255, 255, 0.09);
+    }
+    .row:hover {
+      z-index: 3;
+    }
+    .row:hover > .tip {
+      display: grid;
+    }
   }
 
   /* A large change at a level; two identical animations alternate so a flash restarts without remounting. */
