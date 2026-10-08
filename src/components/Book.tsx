@@ -45,7 +45,7 @@ const LastPrice = memo(function LastPrice() {
   const px = useStore(store, (s) => s.trades[0]?.px);
   const full = useStore(store, (s) => s.trades[0]?.pxFull);
   return (
-    <span className="px text-base leading-none" title={full} data-testid="last">
+    <span className="px" title={full} data-testid="last">
       {px}
     </span>
   );
