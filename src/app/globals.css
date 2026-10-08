@@ -109,13 +109,8 @@
     }
   }
   /* Marks a fill that links to the explorer. */
-  a.row:focus-visible > .total::before {
+  a.row > .total::before {
     content: "↗\00a0";
-  }
-  @media (hover: hover) {
-    a.row:hover > .total::before {
-      content: "↗\00a0";
-    }
   }
 
   /* Cumulative depth; scaleX only, never layout. */
