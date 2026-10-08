@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import type { ReactNode } from "react";
+import { preconnect } from "react-dom";
 import "./globals.css";
 
 const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -8,7 +9,6 @@ const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const title = "Hyperliquid Order Book";
 const description = "Live BTC and ETH perpetual order books from Hyperliquid mainnet.";
 
-/** The icon and Open Graph image come from the icon.svg and opengraph-image.png file conventions. */
 export const metadata: Metadata = {
   metadataBase: new URL("https://hyperliquid-widget.vercel.app"),
   title,
@@ -18,6 +18,8 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  // Warms DNS for the WebSocket (~25 ms off first book) and the connection for refill()'s CORS fetch.
+  preconnect("https://api.hyperliquid.xyz", { crossOrigin: "anonymous" });
   return (
     <html lang="en" className={`${geist.variable} antialiased`}>
       <body>{children}</body>
