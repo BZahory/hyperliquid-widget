@@ -17,6 +17,8 @@ interface SelectProps<T> {
   /** Icon-only trigger; the selected label stays exposed to AT. */
   icon?: ReactNode;
   align?: "left" | "right";
+  /** Open the listbox above the trigger. */
+  drop?: "down" | "up";
 }
 
 /** WAI-ARIA select-only combobox: focus stays on the button, aria-activedescendant tracks the option. */
@@ -28,6 +30,7 @@ export function Select<T extends string | number | null>({
   display,
   icon,
   align = "left",
+  drop = "down",
 }: SelectProps<T>) {
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -98,7 +101,7 @@ export function Select<T extends string | number | null>({
         disabled={options.length === 0}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={onKeyDown}
-        className={`flex cursor-pointer items-center gap-1.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
+        className={`hit flex cursor-pointer items-center gap-1.5 rounded-md outline-hidden focus-visible:ring-2 focus-visible:ring-accent/70 ${
           icon ? "p-1.5 text-muted hover:bg-white/6 hover:text-ink" : "hover:text-white"
         }`}
       >
@@ -110,7 +113,7 @@ export function Select<T extends string | number | null>({
             height="12"
             viewBox="0 0 12 12"
             aria-hidden="true"
-            className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`}
+            className={`shrink-0 text-muted transition-transform ${open !== (drop === "up") ? "rotate-180" : ""}`}
           >
             <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
@@ -123,9 +126,9 @@ export function Select<T extends string | number | null>({
           aria-label={label}
           // Tab commits the active option, so reset it when the pointer leaves.
           onMouseLeave={() => setActive(Math.max(selected, 0))}
-          className={`absolute top-full z-10 mt-2 min-w-full overflow-hidden rounded-lg border border-line bg-[#17191c] py-1 text-sm shadow-xl ${
+          className={`absolute z-10 min-w-full overflow-hidden rounded-lg border border-line bg-[#17191c] py-1 text-sm shadow-xl ${
             align === "right" ? "right-0" : "left-0"
-          }`}
+          } ${drop === "up" ? "bottom-full mb-2" : "top-full mt-2"}`}
         >
           {options.map((o, i) => (
             <li

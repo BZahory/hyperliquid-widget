@@ -20,7 +20,7 @@ const TABS: readonly { id: Tab; label: string }[] = [
 const STATUS_LABEL: Record<Status, string> = {
   connecting: "Connecting",
   live: "Live",
-  reconnecting: "Reconnecting",
+  reconnecting: "Reconnecting…",
   offline: "Offline",
 };
 
@@ -34,8 +34,8 @@ export function OrderBook() {
       <Header />
       <section className="card">
         <Tabs />
-        <Controls />
         <Panel />
+        <Controls />
       </section>
     </div>
   );
@@ -44,16 +44,18 @@ export function OrderBook() {
 function Header() {
   const coin = useStore(store, (s) => s.coin);
   const status = useStore(store, (s) => s.status);
+  // Spell out a dropped feed; the dot alone is colour-only.
+  const down = status === "reconnecting" || status === "offline";
   return (
     <header className="card relative">
       <div className="flex items-center gap-3 px-4 pt-3 pb-4">
         <CoinIcon coin={coin} />
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold leading-tight">{ASSETS[coin].label}</h1>
+            <h1 className="whitespace-nowrap text-xl font-semibold leading-tight">{ASSETS[coin].label}</h1>
             <StatusDot status={status} />
           </div>
-          <span className="text-sm text-muted">Perpetuals</span>
+          <span className={`text-sm ${down ? "text-warn" : "text-muted"}`}>{down ? STATUS_LABEL[status] : "Perpetuals"}</span>
         </div>
         <span className="ml-auto rounded-md bg-[#1b1e21] px-2.5 py-1.5 text-sm" title="Max leverage">
           {ASSETS[coin].maxLeverage}×
@@ -84,7 +86,7 @@ function StatusDot({ status }: { status: Status }) {
     status === "live" ? "bg-bid" : status === "offline" ? "bg-ask" : status === "reconnecting" ? "bg-warn" : "bg-muted";
   return (
     <span role="status" data-testid="status" data-status={status} title={STATUS_LABEL[status]}>
-      <span aria-hidden="true" className={`block size-2 rounded-full ${color}${status === "live" ? "" : " pulse"}`} />
+      <span aria-hidden="true" className={`block size-2 rounded-full forced-color-adjust-none ${color}${status === "live" ? "" : " pulse"}`} />
       <span className="sr-only">{STATUS_LABEL[status]}</span>
     </span>
   );
@@ -112,7 +114,7 @@ function Tabs() {
             aria-controls={`panel-${id}`}
             tabIndex={active ? 0 : -1}
             onClick={() => setTab(id)}
-            className="flex-1 cursor-pointer text-center text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+            className="flex-1 cursor-pointer text-center text-[15px] outline-hidden focus-visible:ring-2 focus-visible:ring-accent/70"
           >
             <span className={`inline-block px-6 pb-3 pt-3 ${active ? "-mb-px border-b-2 border-accent text-ink" : "text-muted"}`}>
               {label}
@@ -124,6 +126,18 @@ function Tabs() {
   );
 }
 
+/** Arrow keys walk the rows (not tab stops): a book row shows its tooltip, a trade opens on Enter. */
+function walkRows(e: KeyboardEvent<HTMLDivElement>) {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  e.preventDefault();
+  const rows = [...e.currentTarget.querySelectorAll<HTMLElement>(".row[tabindex]")];
+  const at = rows.indexOf(document.activeElement as HTMLElement);
+  // Start at the first row in view; the trades list renders a few above it.
+  const below = e.currentTarget.firstElementChild!.getBoundingClientRect().bottom - 1;
+  const next = at < 0 ? rows.findIndex((r) => r.getBoundingClientRect().top >= below) : at + (e.key === "ArrowDown" ? 1 : -1);
+  rows[Math.min(Math.max(next, 0), rows.length - 1)]?.focus();
+}
+
 function Panel() {
   const tab = useStore(store, (s) => s.tab);
   const coin = useStore(store, (s) => s.coin);
@@ -131,10 +145,18 @@ function Panel() {
   const stale = useStore(store, (s) => s.status !== "live");
   const unit = quote ? "USD" : coin;
   return (
-    <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className={`book${stale ? " stale" : ""}`}>
-      <div className="row h-9 text-[13px] text-muted">
+    <div
+      role="tabpanel"
+      id={`panel-${tab}`}
+      aria-labelledby={`tab-${tab}`}
+      // The trades list is its own focusable scroller.
+      tabIndex={tab === "orders" ? 0 : undefined}
+      onKeyDown={walkRows}
+      className={`outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/70${stale ? " stale" : ""}`}
+    >
+      <div className="row h-8 text-[13px] text-muted">
         <span>Price</span>
-        <span>Size ({unit})</span>
+        <span className="sz">Size ({unit})</span>
         <span className="total">{tab === "orders" ? `Total (${unit})` : "Time"}</span>
       </div>
       {tab === "orders" ? <Book /> : <Trades />}
@@ -149,23 +171,21 @@ function Controls() {
   const quote = useStore(store, (s) => s.quote);
   const tick = useStore(store, (s) => s.book.tick);
   const groupings = useStore(store, (s) => s.book.groupings);
-  const live = useStore(store, (s) => s.status === "live");
   // An nSigFigs that isn't offered has full precision's step.
   const value = groupings.some((g) => g.value === nSigFigs) ? nSigFigs : null;
   return (
-    <div className="flex items-center justify-between px-5 pt-3 text-sm">
+    <div className="flex items-center justify-between border-t border-line px-5 py-3 text-sm">
       {tab === "orders" ? (
-        <Select
-          label="Price grouping"
-          value={value}
-          options={groupings}
-          onChange={setPrecision}
-          display={tick || "—"}
-        />
+        <div className="flex items-center gap-2">
+          <span className="text-muted" aria-hidden="true">
+            Grouping
+          </span>
+          <Select label="Price grouping" value={value} options={groupings} onChange={setPrecision} display={tick || "—"} drop="up" />
+        </div>
       ) : (
         <span />
       )}
-      <UnitRadios coin={coin} quote={quote} disabled={!live} />
+      <UnitRadios coin={coin} quote={quote} />
     </div>
   );
 }
@@ -180,9 +200,8 @@ function Imbalance() {
   );
 }
 
-/** Size unit as a radio group: one tab stop, arrows move the choice. Disabled while not live: the
- *  buffers are cleared then, so there is nothing to re-derive in the other unit. */
-function UnitRadios({ coin, quote, disabled }: { coin: Coin; quote: boolean; disabled: boolean }) {
+/** Size unit as a radio group: one tab stop, arrows move the choice; works offline on the kept data. */
+function UnitRadios({ coin, quote }: { coin: Coin; quote: boolean }) {
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
     e.preventDefault();
@@ -195,9 +214,8 @@ function UnitRadios({ coin, quote, disabled }: { coin: Coin; quote: boolean; dis
       role="radio"
       aria-checked={active}
       tabIndex={active ? 0 : -1}
-      disabled={disabled}
       onClick={() => setQuote(value)}
-      className={`cursor-pointer rounded px-1 outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:cursor-default disabled:opacity-50 ${
+      className={`hit cursor-pointer rounded px-1 outline-hidden focus-visible:ring-2 focus-visible:ring-accent/70 ${
         active ? "font-medium text-ink" : "text-muted hover:text-ink"
       }`}
     >
