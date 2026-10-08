@@ -105,6 +105,25 @@ const flashesAt = () => page.evaluate(() => [window.__FLASHES__, window.__RENDER
 const [flashes0, commits0] = await flashesAt();
 const changes = await countChanges(5_000);
 check("book updates visibly", changes >= 3, `${changes} distinct frames in 5s`);
+// A bid's tooltip shows on hover, fits on screen, and carries exact values.
+await page.locator('.bids .row[data-kind="level"]').nth(3).hover();
+const tip = await page.$eval(".bids .row:hover > .tip", (el) => {
+  const r = el.getBoundingClientRect();
+  const text = [...el.children].map((c) => c.textContent).join(" ").trim();
+  return { shown: getComputedStyle(el).display === "grid", text, inView: r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight };
+});
+check(
+  "row tooltip shows sweep details on hover",
+  tip.shown && tip.inView && /^Total \(\w+\) [\d,.]+ Avg price [\d,.]+$/.test(tip.text) && !/0000000|9999999/.test(tip.text),
+  tip.text,
+);
+const titles = await page.$$eval('.bids .row:hover > span, [data-testid="spread"] > span[title]', (els) => els.map((e) => e.title));
+check(
+  "number cells reveal their full value",
+  titles.length === 5 && titles.every((t) => /^[\d,.]+%?$/.test(t)) && !/0000000|9999999/.test(titles.join(" ")),
+  titles.join(" · "),
+);
+await page.mouse.move(0, 0);
 const stats = await page.evaluate(() => window.__RENDER_STATS__);
 check(
   "memoized rows render only when their props change",
@@ -169,11 +188,15 @@ await page.waitForFunction(() => document.querySelectorAll('[data-testid="trades
   timeout: 20_000,
 });
 const fills = await page.$$eval('[data-testid="trades"] .row[data-kind="level"]', (rows) =>
-  rows.map((r) => ({ side: r.querySelector(".px").className.includes("buy") ? "buy" : r.querySelector(".px").className.includes("sell") ? "sell" : "", time: r.querySelector(".total").textContent })),
+  rows.map((r) => ({
+    side: r.querySelector(".px").className.includes("buy") ? "buy" : r.querySelector(".px").className.includes("sell") ? "sell" : "",
+    time: r.querySelector(".total").textContent,
+    full: r.querySelector(".px").title && r.querySelector(".sz").title,
+  })),
 );
 check(
   "trades tab renders recent fills",
-  fills.length >= 10 && fills.every((f) => f.side && /^\d{2}:\d{2}:\d{2}$/.test(f.time)),
+  fills.length >= 10 && fills.every((f) => f.side && f.full && /^\d{2}:\d{2}:\d{2}$/.test(f.time)),
   `${fills.length} fills, newest ${fills[0]?.time}`,
 );
 const flashesBeforeOrders = await page.evaluate(() => window.__FLASHES__);

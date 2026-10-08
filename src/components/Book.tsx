@@ -12,9 +12,10 @@ const kindOf = (slot: Slot): RowKind => (slot.px ? "level" : "skeleton");
 export function Book() {
   const book = useStore(store, (s) => s.book);
   const loading = useStore(store, (s) => s.loading);
+  const unit = useStore(store, (s) => (s.quote ? "USD" : s.coin));
 
   const row = (side: "ask" | "bid", slot: Slot, i: number) => (
-    <Row key={i} side={side} kind={kindOf(slot)} {...slot} />
+    <Row key={i} side={side} kind={kindOf(slot)} unit={unit} {...slot} />
   );
 
   return (
@@ -25,8 +26,8 @@ export function Book() {
       </div>
       <div className="row bg-[#2a2d31] text-muted" data-testid="spread">
         <span className="px">Spread</span>
-        <span className="sz text-ink">{book.spread}</span>
-        <span className="total text-ink">{book.spreadPct}</span>
+        <span className="sz text-ink" title={book.spreadFull || undefined}>{book.spread}</span>
+        <span className="total text-ink" title={book.spreadPctFull || undefined}>{book.spreadPct}</span>
       </div>
       <div className="bids" data-testid="bids">
         {book.bids.map((slot, i) => row("bid", slot, i))}

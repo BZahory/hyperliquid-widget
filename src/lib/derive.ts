@@ -1,105 +1,126 @@
 import type { DisplayBook, Grouping, NSigFigs, Slot, TradeSlot, WireL2Book, WireLevel, WireTrade } from "./types";
 
-/** Rows per side. Fixed so the DOM never changes shape. */
+/** Rows per side, fixed so the DOM never changes shape. */
 export const DEPTH = 12;
 /** Rows in the trades tab: the same height as both sides of the book plus the spread row. */
 export const TRADES = DEPTH * 2 + 1;
 /** A level flashes when its size changes by ≥ FLASH_PCT% and by ≥ FLASH_AVGS average levels of its side;
  *  the size floor keeps dust orders (a 100% change) from flashing every frame (see README). */
-const FLASH_PCT = 50;
-const FLASH_AVGS = 2;
+const FLASH_PCT = 50n;
+const FLASH_AVGS = 2n;
 
 export interface DeriveOptions {
   szDecimals: number;
   nSigFigs: NSigFigs;
-  /** Show size/total/depth in quote currency (USD) instead of base. */
+  /** Sizes and totals in USD instead of the base asset. */
   quote: boolean;
 }
 
-const EMPTY_SLOT: Slot = { px: "", sz: "", total: "", ratio: 0, flash: 0 };
+const EMPTY_SLOT: Slot = { px: "", sz: "", total: "", ratio: 0, pxFull: "", szFull: "", totalFull: "", avg: "", flash: 0 };
 
 export const EMPTY_BOOK: DisplayBook = {
   asks: Array<Slot>(DEPTH).fill(EMPTY_SLOT),
   bids: Array<Slot>(DEPTH).fill(EMPTY_SLOT),
   spread: "",
   spreadPct: "",
+  spreadFull: "",
+  spreadPctFull: "",
   tick: "",
   groupings: [],
 };
 
-const EMPTY_TRADE: TradeSlot = { px: "", sz: "", time: "", side: "", flash: "", flashSeq: 0 };
+const EMPTY_TRADE: TradeSlot = { px: "", sz: "", time: "", side: "", pxFull: "", szFull: "", flash: "", flashSeq: 0 };
 export const EMPTY_TRADES: TradeSlot[] = Array<TradeSlot>(TRADES).fill(EMPTY_TRADE);
 
-const formatters = new Map<number, Intl.NumberFormat>();
+/** Fixed-point scale for wire decimals (≤ 6 on the wire), so sums are exact; notionals are at 2 × SCALE. */
+const SCALE = 8;
+const ONE = 10n ** BigInt(SCALE);
+
+/** "83452.5" → 8345250000000n. */
+function toInt(s: string): bigint {
+  const [whole, frac = ""] = s.split(".");
+  return BigInt(whole + frac.padEnd(SCALE, "0").slice(0, SCALE));
+}
+
+/** Fixed-point → decimal string, which Intl formats exactly. */
+function toDec(n: bigint, scale = SCALE): `${number}` {
+  const neg = n < 0n;
+  const s = (neg ? -n : n).toString().padStart(scale + 1, "0");
+  return `${neg ? "-" : ""}${s.slice(0, -scale)}.${s.slice(-scale)}` as `${number}`;
+}
+
+/** a / b at SCALE, rounded half up; a and b at the same scale, both ≥ 0. */
+const ratioOf = (a: bigint, b: bigint) => (a * ONE + b / 2n) / b;
+
+const formatters = new Map<string, Intl.NumberFormat>();
 const timeFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 
-function fmt(n: number, decimals: number): string {
-  let f = formatters.get(decimals);
+/** Fixed decimals so cells keep their width; `trim` drops trailing zeros. */
+function fmt(v: number | `${number}`, decimals: number, trim = false): string {
+  const key = `${decimals}${trim ? "t" : ""}`;
+  let f = formatters.get(key);
   if (!f) {
-    f = new Intl.NumberFormat("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-    formatters.set(decimals, f);
+    f = new Intl.NumberFormat("en-US", { minimumFractionDigits: trim ? 0 : decimals, maximumFractionDigits: decimals });
+    formatters.set(key, f);
   }
-  return f.format(n);
+  return f.format(v);
 }
 
-/** Significant fractional digits of a wire price: "83452.0" → 0, "2568.1" → 1. */
-function fracDigits(px: string): number {
-  const dot = px.indexOf(".");
-  if (dot < 0) return 0;
-  let end = px.length;
-  while (end > dot + 1 && px.charCodeAt(end - 1) === 48 /* '0' */) end--;
-  return end - dot - 1;
-}
+/** Every significant digit, for the hover reveal. */
+const exact = (v: `${number}`) => fmt(v, 20, true);
 
-/** Price step of a grouping from Hyperliquid's tick rules (≤5 significant figures, ≤ 6 − szDecimals
- *  decimals, integers always allowed). Deterministic, unlike level gaps, which widen when a book thins. */
-function tickOf(price: number, nSigFigs: NSigFigs, szDecimals: number): number {
+/** Whole dollars; a non-zero notional under $0.50 reads "<1", not "0". */
+const usd = (n: bigint) => (n > 0n && 2n * n < ONE * ONE ? "<1" : fmt(toDec(n, 2 * SCALE), 0));
+
+/** Grouping step as a power of ten, from Hyperliquid's tick rules (≤5 sig figs, ≤ 6 − szDecimals decimals). */
+function stepExp(price: number, nSigFigs: NSigFigs, szDecimals: number): number {
   const digits = Math.floor(Math.log10(price)) + 1;
-  if (nSigFigs !== null) return 10 ** (digits - nSigFigs);
-  return Math.max(Math.min(10 ** (digits - 5), 1), 10 ** (szDecimals - 6));
+  if (nSigFigs !== null) return digits - nSigFigs;
+  return Math.max(Math.min(digits - 5, 0), szDecimals - 6);
 }
 
-const fmtTick = (tick: number) => fmt(tick, Math.max(0, -Math.round(Math.log10(tick))));
+const fmtStep = (exp: number) => fmt(10 ** exp, Math.max(0, -exp));
+
+/** Price decimals from the step, not the visible prices, so the column keeps its width. */
+const decimalsFrom = (low: number, nSigFigs: NSigFigs, szDecimals: number) => Math.max(0, -stepExp(low, nSigFigs, szDecimals));
 
 /** Grouping options by step, coarse → fine, each step once; reuses `prev` when unchanged to avoid renders. */
 function groupingsAt(price: number, szDecimals: number, prev: Grouping[]): Grouping[] {
-  const full = tickOf(price, null, szDecimals);
+  const full = stepExp(price, null, szDecimals);
   const next: Grouping[] = [];
   for (const n of [2, 3, 4, 5] as const) {
-    const tick = tickOf(price, n, szDecimals);
-    if (tick > full) next.push({ value: n, label: fmtTick(tick) });
+    const exp = stepExp(price, n, szDecimals);
+    if (exp > full) next.push({ value: n, label: fmtStep(exp) });
   }
-  next.push({ value: null, label: fmtTick(full) });
+  next.push({ value: null, label: fmtStep(full) });
   const same = prev.length === next.length && next.every((g, i) => g.label === prev[i].label);
   return same ? prev : next;
 }
 
 interface Side {
-  px: number[];
-  sz: number[];
-  /** Cumulative size in base units, and in quote units (Σ size × price). */
-  cum: number[];
-  cumQuote: number[];
-  pxDecimals: number;
+  levels: WireLevel[];
+  px: bigint[];
+  sz: bigint[];
+  /** Cumulative size and notional from the touch. */
+  cum: bigint[];
+  cumQuote: bigint[];
 }
 
 function parseSide(wire: WireLevel[]): Side {
   const levels = wire.slice(0, DEPTH);
-  const px = levels.map((l) => Number(l.px));
-  const sz = levels.map((l) => Number(l.sz));
-  const cum: number[] = [];
-  const cumQuote: number[] = [];
-  let acc = 0;
-  let accQuote = 0;
-  let pxDecimals = 0;
+  const px = levels.map((l) => toInt(l.px));
+  const sz = levels.map((l) => toInt(l.sz));
+  const cum: bigint[] = [];
+  const cumQuote: bigint[] = [];
+  let acc = 0n;
+  let accQuote = 0n;
   for (let i = 0; i < levels.length; i++) {
     acc += sz[i];
     accQuote += sz[i] * px[i];
     cum.push(acc);
     cumQuote.push(accQuote);
-    pxDecimals = Math.max(pxDecimals, fracDigits(levels[i].px));
   }
-  return { px, sz, cum, cumQuote, pxDecimals };
+  return { levels, px, sz, cum, cumQuote };
 }
 
 /** What a frame is compared with to find changed levels. */
@@ -110,34 +131,44 @@ export interface Change {
   live: [number, number];
 }
 
-function buildSlots(side: Side, bids: boolean, max: number, pxDecimals: number, opts: DeriveOptions, prev: Slot[], change: Change | null): Slot[] {
-  const cum = opts.quote ? side.cumQuote : side.cum;
-  const decimals = opts.quote ? 0 : opts.szDecimals;
+function buildSlots(side: Side, bids: boolean, max: bigint, pxDecimals: number, opts: DeriveOptions, prev: Slot[], change: Change | null): Slot[] {
+  const show = (n: bigint) => (opts.quote ? usd(n) : fmt(toDec(n), opts.szDecimals));
+  const scale = opts.quote ? 2 * SCALE : SCALE;
+  // Grouped notionals use bucket prices: approximate.
+  const approx = opts.quote && opts.nSigFigs !== null ? "≈" : "";
   const before = change?.before.levels[bids ? 0 : 1] ?? [];
-  const sizes = new Map(before.map((l) => [Number(l.px), Number(l.sz)]));
-  const edge = before.length ? Number(before[before.length - 1].px) : undefined;
+  const sizes = new Map(before.map((l) => [toInt(l.px), toInt(l.sz)]));
+  const edge = before.length ? toInt(before[before.length - 1].px) : undefined;
   const live = change?.live[bids ? 0 : 1] ?? 0;
-  const floor = FLASH_AVGS * (side.cum[side.cum.length - 1] ?? 0);
+  const floor = FLASH_AVGS * (side.cum[side.cum.length - 1] ?? 0n);
   const slots = new Array<Slot>(DEPTH);
   for (let i = 0; i < DEPTH; i++) {
     if (i >= side.px.length) {
       slots[i] = EMPTY_SLOT;
       continue;
     }
-    const size = side.sz[i];
+    const sz = opts.quote ? side.sz[i] * side.px[i] : side.sz[i];
+    const total = opts.quote ? side.cumQuote[i] : side.cum[i];
+    // Average fill of a market order sweeping to here (approximate when grouped).
+    const avg = toDec(side.cum[i] ? (side.cumQuote[i] + side.cum[i] / 2n) / side.cum[i] : side.px[i]);
     // An unknown price is new inside last frame's range, but beyond it is only newly learned depth.
     let flash = prev[i].flash;
     if (i < live) {
       const inside = edge !== undefined && (bids ? side.px[i] > edge : side.px[i] < edge);
-      const was = sizes.get(side.px[i]) ?? (inside ? 0 : size);
-      const delta = Math.abs(size - was);
-      if (delta * 100 >= FLASH_PCT * Math.max(size, was) && delta * side.sz.length >= floor) flash++;
+      const was = sizes.get(side.px[i]) ?? (inside ? 0n : side.sz[i]);
+      const now = side.sz[i];
+      const delta = now > was ? now - was : was - now;
+      if (delta * 100n >= FLASH_PCT * (now > was ? now : was) && delta * BigInt(side.sz.length) >= floor) flash++;
     }
     slots[i] = {
-      px: fmt(side.px[i], pxDecimals),
-      sz: fmt(opts.quote ? size * side.px[i] : size, decimals),
-      total: fmt(cum[i], decimals),
-      ratio: cum[i] / max,
+      px: fmt(side.levels[i].px as `${number}`, pxDecimals),
+      sz: show(sz),
+      total: show(total),
+      ratio: Number(total) / Number(max),
+      pxFull: exact(side.levels[i].px as `${number}`),
+      szFull: approx + exact(toDec(sz, scale)),
+      totalFull: approx + exact(toDec(total, scale)),
+      avg: opts.nSigFigs === null ? fmt(avg, pxDecimals + 2, true) : `≈${fmt(avg, pxDecimals)}`,
       flash,
     };
   }
@@ -165,35 +196,42 @@ export function mergeSnapshots(fast: WireL2Book | null, deep: WireL2Book | null)
 export function deriveBook(snap: WireL2Book, prev: DisplayBook, opts: DeriveOptions, change: Change | null = null): DisplayBook {
   const bids = parseSide(snap.levels[0]);
   const asks = parseSide(snap.levels[1]);
-  const depthOf = (s: Side) => (opts.quote ? s.cumQuote : s.cum)[s.cum.length - 1] ?? 0;
+  const depthOf = (s: Side) => (opts.quote ? s.cumQuote : s.cum)[s.cum.length - 1] ?? 0n;
   const bidDepth = depthOf(bids);
   const askDepth = depthOf(asks);
-  const max = Math.max(bidDepth, askDepth) || 1;
-  const pxDecimals = Math.max(bids.pxDecimals, asks.pxDecimals);
+  const max = (bidDepth > askDepth ? bidDepth : askDepth) || 1n;
+  const low = bids.px[bids.px.length - 1] ?? asks.px[0];
+  const pxDecimals = low !== undefined ? decimalsFrom(Number(toDec(low)), opts.nSigFigs, opts.szDecimals) : 0;
+  const both = bids.px.length > 0 && asks.px.length > 0;
+  const mid = both ? (bids.px[0] + asks.px[0]) / 2n : null;
 
-  let spread = "";
-  let spreadPct = "";
-  let tick = "";
-  let groupings = prev.groupings;
-  const ref = bids.px.length && asks.px.length ? (bids.px[0] + asks.px[0]) / 2 : (bids.px[0] ?? asks.px[0]);
-  if (ref !== undefined) {
-    tick = fmtTick(tickOf(ref, opts.nSigFigs, opts.szDecimals));
-    groupings = groupingsAt(ref, opts.szDecimals, prev.groupings);
-    if (bids.px.length && asks.px.length) {
-      // Grouped levels are a whole step apart; the wire's spread is the real one.
-      const abs = snap.spread ? Number(snap.spread) : asks.px[0] - bids.px[0];
-      spread = fmt(abs, snap.spread ? Math.max(pxDecimals, fracDigits(snap.spread)) : pxDecimals);
-      spreadPct = fmt((abs / ref) * 100, 3) + "%";
-    }
-  }
-  return {
+  const book: DisplayBook = {
     asks: buildSlots(asks, false, max, pxDecimals, opts, prev.asks, change),
     bids: buildSlots(bids, true, max, pxDecimals, opts, prev.bids, change),
-    spread,
-    spreadPct,
-    tick,
-    groupings,
+    spread: "",
+    spreadPct: "",
+    spreadFull: "",
+    spreadPctFull: "",
+    tick: "",
+    groupings: prev.groupings,
   };
+  const ref = mid ?? bids.px[0] ?? asks.px[0];
+  if (ref !== undefined) {
+    const price = Number(toDec(ref));
+    book.tick = fmtStep(stepExp(price, opts.nSigFigs, opts.szDecimals));
+    book.groupings = groupingsAt(price, opts.szDecimals, prev.groupings);
+  }
+  if (mid) {
+    // Grouped levels are a step apart; the wire's spread is the real one.
+    const spread = snap.spread ? toInt(snap.spread) : asks.px[0] - bids.px[0];
+    const pct = toDec(ratioOf(spread * 100n, mid));
+    book.spread = fmt(toDec(spread), decimalsFrom(Number(toDec(bids.px[0])), null, opts.szDecimals));
+    book.spreadPct = `${fmt(pct, 3)}%`;
+    book.spreadFull = exact(toDec(spread));
+    // Grouped, the mid is a bucket mid: approximate.
+    book.spreadPctFull = `${opts.nSigFigs === null ? "" : "≈"}${exact(pct)}%`;
+  }
+  return book;
 }
 
 /** Newest first, capped at the visible rows. `batch` is a wire message, oldest → newest. */
@@ -209,9 +247,6 @@ export function deriveTrades(
   prev: readonly TradeSlot[],
   opts: Pick<DeriveOptions, "szDecimals" | "quote">,
 ): TradeSlot[] {
-  let pxDecimals = 0;
-  for (const t of recent) pxDecimals = Math.max(pxDecimals, fracDigits(t.px));
-  const decimals = opts.quote ? 0 : opts.szDecimals;
   const slots = new Array<TradeSlot>(TRADES);
   for (let i = 0; i < TRADES; i++) {
     const t = recent[i];
@@ -219,14 +254,15 @@ export function deriveTrades(
       slots[i] = EMPTY_TRADE;
       continue;
     }
-    const px = Number(t.px);
-    const sz = Number(t.sz);
+    const value = toInt(t.sz) * toInt(t.px);
     const isFresh = i < fresh;
     slots[i] = {
-      px: fmt(px, pxDecimals),
-      sz: fmt(opts.quote ? sz * px : sz, decimals),
+      px: fmt(t.px as `${number}`, decimalsFrom(Number(t.px), null, opts.szDecimals)),
+      sz: opts.quote ? usd(value) : fmt(t.sz as `${number}`, opts.szDecimals),
       time: timeFmt.format(t.time),
       side: t.side === "B" ? "buy" : "sell",
+      pxFull: exact(t.px as `${number}`),
+      szFull: exact(opts.quote ? toDec(value, 2 * SCALE) : (t.sz as `${number}`)),
       flash: isFresh ? (t.side === "B" ? "up" : "down") : prev[i].flash,
       flashSeq: isFresh ? prev[i].flashSeq + 1 : prev[i].flashSeq,
     };

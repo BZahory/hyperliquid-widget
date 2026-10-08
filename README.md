@@ -29,9 +29,9 @@ src/lib/socket.ts   module-level manager: registry keyed by subscription identit
 src/lib/store.ts    two latest-wins slots (fast top-5 feed, deep 20-level feed) + a capped
         │           newest-first trade list ──► ONE requestAnimationFrame ──► commit()
         ▼
-src/lib/derive.ts   mergeSnapshots() + deriveBook(): parse once, cumulative sums, one max shared
-        │           by both sides, per-slot change detection, preformatted strings;
-        │           deriveTrades(): same for the trades tab
+src/lib/derive.ts   mergeSnapshots() + deriveBook(): parse once to bigint fixed-point, exact
+        │           cumulative sums, one max shared by both sides, change flashes, preformatted
+        │           strings; deriveTrades(): same for the trades tab
         ▼
 zustand vanilla store (one setState per frame)
         ▼
@@ -45,6 +45,8 @@ Where the perf-sensitive choices live:
 | --- | --- |
 | React renders at most once per frame regardless of message rate | `store.ts` — `schedule()` / `flush()`: one rAF, latest snapshot wins |
 | All parsing/formatting happens once, outside components | `derive.ts`; components receive strings and 0..1 ratios (`types.ts`) |
+| No float in any displayed decimal | `derive.ts` — wire strings parse to `bigint` at scale 8, so sums and size × price are exact; `Intl.NumberFormat` formats the resulting decimal strings exactly. Only bar ratios and the power-of-ten grouping step are floats |
+| Tooltips cost no renders | `Row.tsx` renders each row's tooltip with the row; `globals.css` `.row:hover > .tip` shows it. Full values are native `title`s |
 | Zero wasted renders | ≤ 1 commit per frame (~1.85/s, one per fast snapshot); header, controls and menus don't re-render in steady state. `Row.tsx` — `memo` with primitive props, so a row renders only when its props change (most do each tick: totals and the shared max move); `verify.mjs` counts Row fibers that rendered vs. whose props changed via the React DevTools commit hook |
 | Depth bars never trigger layout | `globals.css` `.bar` — `transform: scaleX()` with a 120 ms linear transition |
 | Zero layout shift | fixed 32 px rows (22 px below 900 px viewport height), fixed grid columns, `font-variant-numeric: tabular-nums` (checked in `verify.mjs`) |
@@ -115,6 +117,13 @@ grouping and unit controls above the book) and then adds what a trader actually 
 - Depth bars and totals follow the selected unit (base asset or USD notional).
 - **Sweep highlight** on hover: every level between the touch and the cursor lights up, i.e. what a
   market order of that depth would eat. Pure CSS (`:hover ~` for asks, `:has(~ :hover)` for bids).
+- **Hover tooltip** with what that sweep means: its total at full precision in the selected unit
+  and its average fill price (marked `≈` when grouped, since grouped levels are bucket prices, not
+  real ones). Beside the card on wide screens; above asks and below bids on narrow ones, so it
+  never covers the highlighted range.
+- **Full values on hover**: every price, size, total and spread cell reveals its unrounded value
+  in the selected unit (a native `title`; the spread %, a non-terminating ratio, to 8 decimals).
+  USD values and the spread % are marked `≈` when grouped.
 - **Grouping as price steps.** The control above the book shows the current step (e.g. `10`) and
   the dropdown lists the `nSigFigs` options (2–5, then full precision) by the step each produces at
   the current price, derived from Hyperliquid's tick rules (≤5 significant figures, ≤ 6 − szDecimals
@@ -122,6 +131,8 @@ grouping and unit controls above the book) and then adds what a trader actually 
   `100 · 10 · 1 · 0.1` for ETH. Each step is listed once: where 5 gives the same step as full
   precision (it does for both today), it is the same book, so only full precision is offered. Sizes
   can be shown in USD or the base asset.
+- Prices show the decimals of the step, not of whichever prices are on screen, so columns keep
+  their width; a USD size under half a dollar reads `<1`, not `0`.
 - **Trades tab**: the most recent fills, newest first, price coloured by taker side, with a flash on
   each new fill.
 - Loading skeleton on every switch, a status dot by the market name (connecting / live /
@@ -134,7 +145,7 @@ grouping and unit controls above the book) and then adds what a trader actually 
   component. `cacheComponents`, `partialPrefetching` and the React Compiler were removed from the
   generated config: a single static page with no server data gains nothing from them, and explicit
   `memo` keeps the re-render story inspectable.
-- **Tailwind v4** for layout utilities; the row geometry, bars, flashes, skeleton and hover rules are
+- **Tailwind v4** for layout utilities; the row geometry, bars, skeleton, hover and tooltip rules are
   plain CSS in `globals.css`, where they're easier to read as one unit.
 - **zustand (vanilla store)** — an external store the data layer can write to from a rAF callback,
   consumed with `useStore` selectors so the header, book and controls each re-render only for the
@@ -143,11 +154,13 @@ grouping and unit controls above the book) and then adds what a trader actually 
 
 ## Verification
 
-`pnpm verify` drives Chromium against live mainnet and checks: the book renders and visibly
-updates; changed rows flash, about one per frame, and not on a tab or market switch; memoized rows render only when their props change; digits are tabular and
-rows share one height; the precision dropdown regroups prices; switching symbol clears old rows
-synchronously and shows the new book; menus close on outside click; keyboard selection works; DevTools-style offline → status
-`offline` → online → status `live` and data resumes without reload; zero console errors.
+`pnpm verify` drives Chromium against live mainnet and checks: the book renders and visibly updates;
+changed rows flash, about one per frame, and not on a tab or market switch; a row's tooltip shows on
+hover, on screen, with no float artefacts; number cells reveal their full values; memoized rows
+render only when their props change; digits are tabular and rows share one height; the precision
+dropdown regroups prices; switching symbol clears old rows synchronously and shows the new book;
+menus close on outside click; keyboard selection works; DevTools-style offline → status `offline` →
+online → status `live` and data resumes without reload; zero console errors.
 
 ## Next steps
 

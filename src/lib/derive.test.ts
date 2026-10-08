@@ -18,7 +18,7 @@ describe("deriveBook", () => {
     expect(book.bids).toHaveLength(DEPTH);
     expect(book.asks).toHaveLength(DEPTH);
     expect(book.bids[1]).toEqual(EMPTY_BOOK.bids[0]);
-    expect(book.bids[1]).toMatchObject({ px: "", sz: "", total: "", ratio: 0, flash: 0 });
+    expect(book.bids[1]).toMatchObject({ px: "", sz: "", total: "", ratio: 0, pxFull: "", szFull: "", totalFull: "", avg: "", flash: 0 });
     expect(EMPTY_BOOK.asks).toHaveLength(DEPTH);
   });
 
@@ -37,11 +37,16 @@ describe("deriveBook", () => {
     expect(book.bids[DEPTH - 1].ratio).toBe(1);
   });
 
-  it("formats prices with thousands separators and the snapshot's shared decimals", () => {
+  it("formats prices with thousands separators and the decimals of the step, whichever prices are shown", () => {
     expect(derive(snap([["83452.0", "1"]], [["83453.0", "1"]])).bids[0].px).toBe("83,452");
     const book = derive(snap([["2568.0", "1"]], [["2568.1", "1"]]), null, eth);
-    expect(book.bids[0].px).toBe("2,568.0"); // padded to match the 1-decimal neighbour
+    expect(book.bids[0].px).toBe("2,568.0");
     expect(book.asks[0].px).toBe("2,568.1");
+    expect(derive(snap([["2568.0", "1"]], [["2569.0", "1"]]), null, eth).bids[0].px).toBe("2,568.0"); // tick 0.1
+    expect(derive(snap([["2560.0", "1"]], [["2570.0", "1"]]), null, { ...eth, nSigFigs: 3 }).bids[0].px).toBe("2,560"); // step 10
+    // A book straddling a power of ten takes its deepest price's decimals.
+    const straddle = derive(snap([["1000.1", "1"], ["999.95", "1"]], [["1000.2", "1"]]), null, eth);
+    expect(straddle.bids.slice(0, 2).map((s) => s.px)).toEqual(["1,000.10", "999.95"]);
   });
 
   it("formats a dot-less wire price", () => {
@@ -58,14 +63,15 @@ describe("deriveBook", () => {
   it("uses the wire's full-precision spread when grouped", () => {
     const grouped = { ...snap([["83000.0", "1"]], [["84000.0", "1"]]), spread: "1.0" };
     expect(derive(grouped, null, { ...opts, nSigFigs: 2 })).toMatchObject({ spread: "1", spreadPct: "0.001%" });
-    const ethGrouped = { ...snap([["2560.0", "1"]], [["2570.0", "1"]]), spread: "0.1" };
-    expect(derive(ethGrouped, null, { ...opts, nSigFigs: 3 }).spread).toBe("0.1");
+    // Always at full precision's decimals, so the cell keeps its width as the spread moves.
+    const ethGrouped = (spread: string) => derive({ ...snap([["2560.0", "1"]], [["2570.0", "1"]]), spread }, null, { ...eth, nSigFigs: 3 }).spread;
+    expect([ethGrouped("0.1"), ethGrouped("1.0")]).toEqual(["0.1", "1.0"]);
     expect(mergeSnapshots(grouped, snap([["82000.0", "1"]], [["85000.0", "1"]]))!.spread).toBe("1.0");
   });
 
   it("leaves spread blank when a side is empty", () => {
     const book = derive(snap([], [["101.0", "1"]]));
-    expect(book).toMatchObject({ spread: "", spreadPct: "" });
+    expect(book).toMatchObject({ spread: "", spreadPct: "", spreadFull: "", spreadPctFull: "" });
   });
 
   it("derives the grouping tick from nSigFigs and price magnitude, not from level gaps", () => {
@@ -96,12 +102,53 @@ describe("deriveBook", () => {
     expect(labels("123456.0", "123457.0", opts)).toEqual(["10,000", "1,000", "100", "10", "1"]);
   });
 
+  it("shows a non-zero notional under half a dollar as <1, not 0", () => {
+    const book = derive(snap([["2568.1", "0.0001"], ["2568.0", "0.0002"]], [["2568.2", "0.0004"]]), null, { ...eth, quote: true });
+    expect(book.bids.slice(0, 2).map((s) => [s.sz, s.total])).toEqual([["<1", "<1"], ["1", "1"]]);
+    expect(book.bids[0].szFull).toBe("0.25681");
+  });
+
   it("quote mode accumulates each level's own notional and scales bars by it", () => {
     const book = derive(snap([["2500.0", "1"], ["2400.0", "1"], ["2300.0", "1"]], [["2600.0", "2"]]), null, { ...opts, quote: true });
     expect(book.bids.slice(0, 3).map((s) => s.total)).toEqual(["2,500", "4,900", "7,200"]);
     expect(book.asks[0]).toMatchObject({ sz: "5,200", total: "5,200" });
     expect(book.bids[2].ratio).toBe(1);
     expect(book.asks[0].ratio).toBeCloseTo(5200 / 7200);
+  });
+
+  it("sums and multiplies wire decimals exactly", () => {
+    // 0.1 + 0.2 and 2568.7 × 0.1234 are inexact in floating point.
+    const book = snap([["2568.7", "0.1"], ["2568.6", "0.2"]], [["2568.8", "0.1234"]]);
+    expect(derive(book, null, eth).bids[1].totalFull).toBe("0.3");
+    expect(derive(book, null, { ...eth, quote: true }).bids[1].totalFull).toBe("770.59");
+    expect(derive(book, null, { ...eth, quote: true }).asks[0].totalFull).toBe("316.98992");
+    // A float product drops the last digit here (…329.78204).
+    const big = snap([["123456.7", "98765.43217"]], [["123457.0", "1"]]);
+    expect(derive(big, null, { ...opts, quote: true }).bids[0].totalFull).toBe("12,193,254,329.782039");
+  });
+
+  it("fills the tooltip: sweep total in the selected unit and average fill, approximate when grouped", () => {
+    const wire = snap([["100.0", "1"], ["99.0", "3"]], [["101.0", "2"]]);
+    const book = derive(wire);
+    expect(book.bids[0]).toMatchObject({ avg: "100", totalFull: "1" });
+    expect(book.bids[1]).toMatchObject({ avg: "99.25", totalFull: "4" });
+    expect(derive(wire, null, { ...opts, quote: true }).bids[1].totalFull).toBe("397");
+    expect(derive(wire, null, { ...opts, nSigFigs: 2 }).bids[1].avg).toBe("≈99");
+  });
+
+  it("reveals each number's full value in the selected unit, exactly, and marks approximate ones", () => {
+    const wire = snap([["2568.1", "0.12345"]], [["2568.2", "0.1234"]]);
+    expect(derive(wire, null, eth).bids[0]).toMatchObject({ px: "2,568.1", sz: "0.1235", pxFull: "2,568.1", szFull: "0.12345" });
+    // In float, 2568.2 × 0.1234 = 316.91587999999996 and 2568.2 − 2568.1 = 0.09999999999990905.
+    const book = derive(wire, null, { ...eth, quote: true });
+    expect(book.asks[0]).toMatchObject({ sz: "317", szFull: "316.91588", totalFull: "316.91588" });
+    expect(book).toMatchObject({ spread: "0.1", spreadFull: "0.1", spreadPctFull: "0.00389385%" });
+    // Grouped: USD values come from bucket prices and the mid is a bucket mid.
+    const grouped = derive({ ...wire, spread: "0.1" }, null, { ...eth, quote: true, nSigFigs: 3 });
+    expect(grouped.asks[0]).toMatchObject({ szFull: "≈316.91588", totalFull: "≈316.91588" });
+    expect(grouped).toMatchObject({ spreadFull: "0.1", spreadPctFull: "≈0.00389385%" });
+    expect(derive(wire, null, { ...eth, nSigFigs: 3 }).bids[0].szFull).toBe("0.12345");
+    expect(derive(snap([["100.0", "1"]], [["101.0", "2"]]))).toMatchObject({ spreadFull: "1", spreadPctFull: "0.99502488%" });
   });
 });
 
@@ -189,9 +236,9 @@ describe("trades", () => {
     const recent = [trade("83452.0", "0.5", "B"), trade("83451.0", "0.25", "A")];
     const first = deriveTrades(recent, 0, EMPTY_TRADES, { szDecimals: 5, quote: false });
     expect(first).toHaveLength(TRADES);
-    expect(first[0]).toMatchObject({ px: "83,452", sz: "0.50000", side: "buy", flashSeq: 0 });
+    expect(first[0]).toMatchObject({ px: "83,452", sz: "0.50000", side: "buy", pxFull: "83,452", szFull: "0.5", flashSeq: 0 });
     expect(first[0].time).toMatch(/^\d{2}:\d{2}:\d{2}$/);
-    expect(first[1]).toMatchObject({ px: "83,451", sz: "0.25000", side: "sell", flashSeq: 0 });
+    expect(first[1]).toMatchObject({ px: "83,451", sz: "0.25000", side: "sell", szFull: "0.25", flashSeq: 0 });
     expect(first[2]).toMatchObject({ px: "", side: "" });
 
     const next = deriveTrades([trade("83453.0", "1", "B"), ...recent], 1, first, { szDecimals: 5, quote: false });
@@ -207,8 +254,16 @@ describe("trades", () => {
     expect(next[1]).toMatchObject({ side: "sell", flash: "up", flashSeq: 1 }); // shifted in, slot unchanged
   });
 
-  it("shows trade sizes in quote currency when asked", () => {
-    const [slot] = deriveTrades([trade("2500.0", "2", "B")], 0, EMPTY_TRADES, { szDecimals: 4, quote: true });
-    expect(slot.sz).toBe("5,000");
+  it("formats trade prices at the tick's decimals", () => {
+    const eth = (...px: string[]) => deriveTrades(px.map((p, i) => ({ ...trade(p, "1", "B"), coin: "ETH", tid: i })), 0, EMPTY_TRADES, { szDecimals: 4, quote: false });
+    expect(eth("2569.0", "2570.0").slice(0, 2).map((s) => s.px)).toEqual(["2,569.0", "2,570.0"]);
+    expect(eth("2569.9", "2570.0").slice(0, 2).map((s) => s.px)).toEqual(["2,569.9", "2,570.0"]);
+  });
+
+  it("shows trade sizes in quote currency when asked: rounded in the cell, exact on hover", () => {
+    const quote = (px: string, sz: string, szDecimals = 4) => deriveTrades([trade(px, sz, "B")], 0, EMPTY_TRADES, { szDecimals, quote: true })[0];
+    expect(quote("2568.7", "0.1234")).toMatchObject({ sz: "317", szFull: "316.97758" });
+    expect(quote("2569.1", "0.0001").sz).toBe("<1");
+    expect(quote("123456.7", "98765.43217", 5).szFull).toBe("12,193,254,329.782039"); // float: …329.78204
   });
 });

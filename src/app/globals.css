@@ -109,6 +109,12 @@
   .row:hover::after {
     background: rgba(255, 255, 255, 0.09);
   }
+  .row:hover {
+    z-index: 3;
+  }
+  .row:hover > .tip {
+    display: grid;
+  }
 
   /* A large change at a level; two identical animations alternate so a flash restarts without remounting. */
   .ask {
@@ -129,6 +135,47 @@
   .flash-up-b > .sz { animation: flash-up-b 420ms ease-out; }
   .flash-down-a > .sz { animation: flash-down-a 420ms ease-out; }
   .flash-down-b > .sz { animation: flash-down-b 420ms ease-out; }
+
+  /* Shown by CSS alone; placed off the swept range (above asks, below bids, or beside the card). */
+  .tip {
+    display: none;
+    position: absolute;
+    left: 12px;
+    top: calc(100% + 4px);
+    z-index: 1; /* under its row's text, so its shadow never dims it */
+    grid-template-columns: auto auto;
+    gap: 6px 16px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-line);
+    border-radius: 8px;
+    background: #1b1e21;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+    color: var(--color-ink);
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .asks .tip {
+    top: auto;
+    bottom: calc(100% + 4px);
+  }
+  @media (min-width: 1000px) {
+    .row > .tip {
+      left: auto;
+      right: calc(100% + 12px);
+      top: 50%;
+      bottom: auto;
+      transform: translateY(-50%);
+    }
+  }
+  .tip > span {
+    text-align: right;
+  }
+  .tip > .k {
+    color: var(--color-muted);
+    text-align: left;
+  }
 
   .row[data-kind="skeleton"] > .sz {
     height: 100%;

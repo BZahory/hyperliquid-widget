@@ -38,6 +38,12 @@ export interface Slot {
   total: string;
   /** Cumulative size / max cumulative across both sides. */
   ratio: number;
+  /** Full values for hover, in the selected unit; "≈" on grouped USD values. */
+  pxFull: string;
+  szFull: string;
+  totalFull: string;
+  /** Tooltip: average fill of a sweep to here. */
+  avg: string;
   /** Flash count; its parity alternates two identical animations so a flash restarts without remounting. */
   flash: number;
 }
@@ -56,6 +62,9 @@ export interface TradeSlot {
   sz: string;
   time: string;
   side: "buy" | "sell" | "";
+  /** Full values for hover. */
+  pxFull: string;
+  szFull: string;
   /** Set when a fresh trade lands here and kept as rows shift, so a shifted row never restarts it. */
   flash: Flash;
   /** Increments when a fresh trade lands in this slot, so only new fills animate, not shifted ones. */
@@ -68,6 +77,9 @@ export interface DisplayBook {
   bids: Slot[];
   spread: string;
   spreadPct: string;
+  /** Full values for hover; the % is "≈" when grouped. */
+  spreadFull: string;
+  spreadPctFull: string;
   /** Price step of the current grouping. */
   tick: string;
   /** Coarse → fine, each step once. */
