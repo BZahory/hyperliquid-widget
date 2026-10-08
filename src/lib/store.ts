@@ -222,6 +222,7 @@ export function boot() {
 export function setCoin(coin: Coin) {
   if (coin === store.getState().coin) return;
   store.setState({ coin, loading: true, book: EMPTY_BOOK, trades: EMPTY_TRADES, tradesTop: 0 });
+  if (!booted) return; // boot subscribes to it
   resubscribeBook();
   resubscribeTrades();
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, type CSSProperties, type KeyboardEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useLayoutEffect, type CSSProperties, type KeyboardEvent } from "react";
 import { useStore } from "zustand";
 import { ASSETS, COINS, type Coin } from "@/lib/assets";
 import { boot, setCoin, setPrecision, setQuote, setTab, store, type Tab } from "@/lib/store";
@@ -24,25 +25,28 @@ const STATUS_LABEL: Record<Status, string> = {
   offline: "Offline",
 };
 
-export function OrderBook() {
-  // The app's only effect; boot is idempotent, so StrictMode's double call is harmless.
-  useEffect(boot, []);
-  const coin = useStore(store, (s) => s.coin);
+/** `coin` comes from the route; labels read it, not the store, so a prerendered /eth never shows BTC. */
+export function OrderBook({ coin }: { coin: Coin }) {
+  // Before paint, so the old coin's book never shows under the new one's header. boot is idempotent.
+  useLayoutEffect(() => {
+    setCoin(coin);
+    boot();
+  }, [coin]);
 
   return (
     <div className="flex w-full max-w-[440px] flex-col gap-4" style={{ "--asset": ASSETS[coin].color } as CSSProperties}>
-      <Header />
+      <Header coin={coin} />
       <section className="card">
         <Tabs />
-        <Panel />
-        <Controls />
+        <Panel coin={coin} />
+        <Controls coin={coin} />
       </section>
     </div>
   );
 }
 
-function Header() {
-  const coin = useStore(store, (s) => s.coin);
+function Header({ coin }: { coin: Coin }) {
+  const router = useRouter();
   const status = useStore(store, (s) => s.status);
   // Spell out a dropped feed; the dot alone is colour-only.
   const down = status === "reconnecting" || status === "offline";
@@ -64,7 +68,7 @@ function Header() {
           label="Market"
           value={coin}
           options={MARKET_OPTIONS}
-          onChange={setCoin}
+          onChange={(next) => router.push(`/${next.toLowerCase()}`, { scroll: false })}
           align="right"
           icon={
             <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
@@ -138,9 +142,8 @@ function walkRows(e: KeyboardEvent<HTMLDivElement>) {
   rows[Math.min(Math.max(next, 0), rows.length - 1)]?.focus();
 }
 
-function Panel() {
+function Panel({ coin }: { coin: Coin }) {
   const tab = useStore(store, (s) => s.tab);
-  const coin = useStore(store, (s) => s.coin);
   const quote = useStore(store, (s) => s.quote);
   const stale = useStore(store, (s) => s.status !== "live");
   const unit = quote ? "USD" : coin;
@@ -164,8 +167,7 @@ function Panel() {
   );
 }
 
-function Controls() {
-  const coin = useStore(store, (s) => s.coin);
+function Controls({ coin }: { coin: Coin }) {
   const tab = useStore(store, (s) => s.tab);
   const nSigFigs = useStore(store, (s) => s.nSigFigs);
   const quote = useStore(store, (s) => s.quote);
