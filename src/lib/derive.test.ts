@@ -37,6 +37,7 @@ describe("deriveBook", () => {
     expect(book.asks.slice(0, 2).map((s) => s.total)).toEqual(["1.00000", "2.00000"]);
     expect(book.bids.slice(0, 3).map((s) => s.ratio)).toEqual([1 / 6, 3 / 6, 1]);
     expect(book.asks.slice(0, 2).map((s) => s.ratio)).toEqual([1 / 6, 2 / 6]);
+    expect(book.bidShare).toBe(0.75);
   });
 
   it("only uses the displayed depth for cumulative totals", () => {

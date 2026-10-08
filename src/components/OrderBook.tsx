@@ -45,30 +45,36 @@ function Header() {
   const coin = useStore(store, (s) => s.coin);
   const status = useStore(store, (s) => s.status);
   return (
-    <header className="card flex items-center gap-3 px-4 py-3">
-      <CoinIcon coin={coin} />
-      <div className="flex flex-col gap-0.5">
-        <div className="flex items-center gap-2">
-          <h1 className="text-xl font-semibold leading-tight">{ASSETS[coin].label}</h1>
-          <StatusDot status={status} />
+    <header className="card relative">
+      <div className="flex items-center gap-3 px-4 pt-3 pb-4">
+        <CoinIcon coin={coin} />
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold leading-tight">{ASSETS[coin].label}</h1>
+            <StatusDot status={status} />
+          </div>
+          <span className="text-sm text-muted">Perpetuals</span>
         </div>
-        <span className="text-sm text-muted">Perpetuals</span>
+        <span className="ml-auto rounded-md bg-[#1b1e21] px-2.5 py-1.5 text-sm" title="Max leverage">
+          {ASSETS[coin].maxLeverage}×
+        </span>
+        <Select
+          label="Market"
+          value={coin}
+          options={MARKET_OPTIONS}
+          onChange={setCoin}
+          align="right"
+          icon={
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          }
+        />
       </div>
-      <span className="ml-auto rounded-md bg-[#1b1e21] px-2.5 py-1.5 text-sm" title="Max leverage">
-        {ASSETS[coin].maxLeverage}×
-      </span>
-      <Select
-        label="Market"
-        value={coin}
-        options={MARKET_OPTIONS}
-        onChange={setCoin}
-        align="right"
-        icon={
-          <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
-        }
-      />
+      {/* Clips the bar to the card's corners without clipping the market menu. */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]">
+        <Imbalance />
+      </div>
     </header>
   );
 }
@@ -160,6 +166,16 @@ function Controls() {
         <span />
       )}
       <UnitRadios coin={coin} quote={quote} disabled={!live} />
+    </div>
+  );
+}
+
+/** Bid (green) vs ask (red) share of the book's depth, moving with every book frame. */
+function Imbalance() {
+  const share = useStore(store, (s) => s.book.bidShare);
+  return (
+    <div className="pointer-events-auto absolute inset-x-0 bottom-0 h-1 bg-ask forced-color-adjust-none" title="Bid vs ask share of the book's 12 levels a side" data-testid="imbalance">
+      <div className="bar inset-0 bg-bid" style={{ transform: `scaleX(${share})` }} />
     </div>
   );
 }

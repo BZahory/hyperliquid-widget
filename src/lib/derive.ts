@@ -27,6 +27,7 @@ export const EMPTY_BOOK: DisplayBook = {
   spreadPct: "",
   spreadFull: "",
   spreadPctFull: "",
+  bidShare: 0.5,
   tick: "",
   groupings: [],
 };
@@ -201,6 +202,7 @@ export function deriveBook(snap: WireL2Book, prev: DisplayBook, opts: DeriveOpti
   const bidDepth = depthOf(bids);
   const askDepth = depthOf(asks);
   const max = (bidDepth > askDepth ? bidDepth : askDepth) || 1n;
+  const bidShare = bidDepth + askDepth ? Number(bidDepth) / Number(bidDepth + askDepth) : 0.5;
   const low = bids.px[bids.px.length - 1] ?? asks.px[0];
   const pxDecimals = low !== undefined ? decimalsFrom(Number(toDec(low)), opts.nSigFigs, opts.szDecimals) : 0;
   const both = bids.px.length > 0 && asks.px.length > 0;
@@ -213,6 +215,7 @@ export function deriveBook(snap: WireL2Book, prev: DisplayBook, opts: DeriveOpti
     spreadPct: "",
     spreadFull: "",
     spreadPctFull: "",
+    bidShare,
     tick: "",
     groupings: prev.groupings,
   };

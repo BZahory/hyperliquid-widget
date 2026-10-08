@@ -80,6 +80,8 @@ export interface DisplayBook {
   /** Full values for hover; the % is "≈" when grouped. */
   spreadFull: string;
   spreadPctFull: string;
+  /** Bids' share of the displayed depth. */
+  bidShare: number;
   /** Price step of the current grouping. */
   tick: string;
   /** Coarse → fine, each step once. */
