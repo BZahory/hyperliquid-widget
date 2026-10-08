@@ -1,5 +1,4 @@
-// Reproduces the live-feed findings the app relies on (see README): normalised ACKs, full snapshots,
-// the fast cadence (5 levels, ~550ms), pre-ACK stragglers. Run: node scripts/probe-ws.mjs (Node ≥ 22).
+// Re-checks the live-feed findings in the README. Run: node scripts/probe-ws.mjs (Node ≥ 22).
 const t0 = Date.now();
 const log = (...a) => console.log(`[+${String(Date.now() - t0).padStart(5)}ms]`, ...a);
 const ws = new WebSocket("wss://api.hyperliquid.xyz/ws");
@@ -8,64 +7,61 @@ const payload = (method, nSigFigs, fast) => {
   if (nSigFigs !== null) subscription.nSigFigs = nSigFigs;
   return JSON.stringify({ method, subscription });
 };
-const step = (d) => Math.abs(Number(d.levels[1][0].px) - Number(d.levels[1][1].px));
+/** The store's switch: unsubscribe both cadences, then subscribe both at the new grouping. */
+const both = (method, nSigFigs) => [true, false].forEach((fast) => ws.send(payload(method, nSigFigs, fast)));
+/** Exponent of the coarsest power of ten every price is a multiple of. */
+const grid = (d) => Math.min(...d.levels.flat().map((l) => { let k = 0; for (let p = Number(l.px); p % 10 === 0 && p; p /= 10) k++; return k; }));
+/** Mirrors fitsGrouping in src/lib/derive.ts, for BTC prices. */
+const fits = (d, n) => (d.spread === undefined) === (n === null) && (n === null || grid(d) === Math.floor(Math.log10(Number(d.levels[0][0].px))) + 1 - n);
 
 let cur = null;
-let prev = null;
-let acked = null;
 let count = 0;
-let beforeAck = 0;
-let afterAck = 0;
+const acked = { fast: false, deep: false };
+const stragglers = { fast: [0, 0], deep: [0, 0] }; // [before ACK, after ACK]
 const gaps = [];
 let last = 0;
 
 ws.onopen = () => {
-  log("open; subscribing BTC full precision with fast:true");
-  ws.send(payload("subscribe", cur, true));
+  log("open; subscribing BTC full precision, fast and deep");
+  both("subscribe", cur);
   setTimeout(() => ws.send(JSON.stringify({ method: "ping" })), 1000);
-  // Flip precision every 900ms to shake out stragglers.
+  // Flip precision at random 300-1500ms intervals to shake out stragglers.
   const order = [4, 3, 2, 5, null];
   let i = 0;
-  const flip = setInterval(() => {
-    const next = order[i++ % order.length];
-    ws.send(payload("unsubscribe", cur, true));
-    ws.send(payload("subscribe", next, true));
-    prev = cur;
-    cur = next;
-    if (i === 10) {
-      clearInterval(flip);
-      setTimeout(() => {
-        log(`l2Book msgs=${count}; median gap=${gaps.sort((a, b) => a - b)[gaps.length >> 1]}ms`);
-        log(`old-grouping stragglers: before ACK=${beforeAck}, after ACK=${afterAck}`);
-        ws.close();
-      }, 3000);
-    }
-  }, 900);
+  const flip = () => {
+    both("unsubscribe", cur);
+    cur = order[i++ % order.length];
+    acked.fast = acked.deep = false;
+    both("subscribe", cur);
+    if (i < 30) return setTimeout(flip, 300 + Math.random() * 1200);
+    setTimeout(() => {
+      log(`l2Book msgs=${count}; median fast gap=${gaps.sort((a, b) => a - b)[gaps.length >> 1]}ms`);
+      for (const k of ["fast", "deep"]) log(`${k} old-grouping stragglers: before ACK=${stragglers[k][0]}, after ACK=${stragglers[k][1]}`);
+      ws.close();
+    }, 3000);
+  };
+  setTimeout(flip, 1500);
 };
 ws.onmessage = (ev) => {
   const msg = JSON.parse(ev.data);
   if (msg.channel === "l2Book") {
     count++;
-    const now = Date.now();
-    if (last) gaps.push(now - last);
-    last = now;
+    const k = msg.data.fast ? "fast" : "deep";
+    if (k === "fast") {
+      if (last) gaps.push(Date.now() - last);
+      last = Date.now();
+    }
     if (count === 1) {
       const [bids, asks] = msg.data.levels;
       log("first snapshot keys:", Object.keys(msg.data), "bids:", bids.length, "asks:", asks.length);
       log("bid0:", JSON.stringify(bids[0]), "ask0:", JSON.stringify(asks[0]));
     }
-    // Old grouping if the top step isn't a multiple of the new step (old finer) or ≥ the old step (old
-    // coarser). Thin tops can produce false positives, so treat the counts as an upper bound.
-    const digits = Math.floor(Math.log10(Number(msg.data.levels[1][0].px))) + 1;
-    const stepOf = (n) => (n === null ? 1 : 10 ** (digits - n));
-    const s = step(msg.data);
-    const stale = prev !== null && (s % stepOf(cur) !== 0 || (stepOf(prev) > stepOf(cur) && s >= stepOf(prev)));
-    if (stale && acked !== cur) beforeAck++;
-    if (stale && acked === cur) afterAck++;
+    if (!fits(msg.data, cur)) stragglers[k][acked[k] ? 1 : 0]++;
     return;
   }
   if (msg.channel === "subscriptionResponse") {
-    if (msg.data.method === "subscribe") acked = msg.data.subscription.nSigFigs ?? null;
+    const sub = msg.data.subscription;
+    if (msg.data.method === "subscribe" && (sub.nSigFigs ?? null) === cur) acked[sub.fast ? "fast" : "deep"] = true;
     if (count === 0) log("subscriptionResponse:", JSON.stringify(msg.data));
     return;
   }

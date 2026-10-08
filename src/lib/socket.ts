@@ -30,8 +30,7 @@ const ACK_TIMEOUT_MS = 5_000;
 interface Entry {
   sub: Sub;
   onData: (data: never) => void;
-  /** l2Book data doesn't echo nSigFigs, so old-grouping stragglers can follow a precision change.
-   *  Verified live: they only arrive before the new subscription's ACK, so data is dropped until then. */
+  /** Drop data until the ACK: most old-grouping stragglers arrive before it (the store drops the rest). */
   acked: boolean;
   ackTimer: ReturnType<typeof setTimeout> | undefined;
 }

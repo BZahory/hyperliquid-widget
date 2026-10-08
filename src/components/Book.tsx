@@ -6,22 +6,21 @@ import { store } from "@/lib/store";
 import { Row, type RowKind } from "./Row";
 import type { Slot } from "@/lib/types";
 
-/** BTC/ETH books are never thinner than DEPTH, so a missing level is always data still on its way. */
-const kindOf = (slot: Slot): RowKind => (slot.px ? "level" : "skeleton");
-
-/** The live part: re-renders once per committed frame; unchanged rows bail out via memo. */
+/** Re-renders once per committed frame; unchanged rows bail out via memo. */
 export function Book() {
   const book = useStore(store, (s) => s.book);
   const loading = useStore(store, (s) => s.loading);
   const unit = useStore(store, (s) => (s.quote ? "USD" : s.coin));
+  // Missing levels are loading until the first deep snapshot; after that the side has no more.
+  const kind: RowKind = loading ? "skeleton" : "empty";
 
   const row = (side: "ask" | "bid", slot: Slot, i: number) => (
-    <Row key={i} side={side} kind={kindOf(slot)} unit={unit} {...slot} />
+    <Row key={i} side={side} kind={slot.px ? "level" : kind} unit={unit} {...slot} />
   );
 
   return (
     <div data-testid="book" data-loading={loading || undefined}>
-      {/* Asks: best price touches the spread. Slot index is the key, never price. */}
+      {/* Keyed by slot index, never price. */}
       <div className="asks" data-testid="asks">
         {book.asks.map((slot, i) => row("ask", slot, i)).reverse()}
       </div>

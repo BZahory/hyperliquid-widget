@@ -86,6 +86,31 @@ const fmtStep = (exp: number) => fmt(10 ** exp, Math.max(0, -exp));
 /** Price decimals from the step, not the visible prices, so the column keeps its width. */
 const decimalsFrom = (low: number, nSigFigs: NSigFigs, szDecimals: number) => Math.max(0, -stepExp(low, nSigFigs, szDecimals));
 
+/** Exponent of the coarsest power of ten dividing every price: a grouped book's actual step. */
+function gridExp(snap: WireL2Book): number {
+  let exp = Infinity;
+  for (const side of snap.levels) {
+    for (const l of side) {
+      let px = toInt(l.px);
+      let k = -SCALE;
+      for (; px && px % 10n === 0n; k++) px /= 10n;
+      exp = Math.min(exp, k);
+    }
+  }
+  return exp;
+}
+
+/** Whether a snapshot is at this grouping: l2Book doesn't echo nSigFigs and old-grouping messages can trail
+ *  the ACK, so check that only grouped books carry `spread` and that prices sit on the step. */
+export function fitsGrouping(snap: WireL2Book, nSigFigs: NSigFigs, szDecimals: number): boolean {
+  if ((snap.spread === undefined) !== (nSigFigs === null)) return false;
+  const lo = snap.levels[0][0] ?? snap.levels[1][0];
+  const hi = snap.levels[1][0] ?? lo;
+  if (nSigFigs === null || !lo) return true;
+  const grid = gridExp(snap);
+  return grid >= stepExp(Number(lo.px), nSigFigs, szDecimals) && grid <= stepExp(Number(hi.px), nSigFigs, szDecimals);
+}
+
 /** Grouping options by step, coarse → fine, each step once; reuses `prev` when unchanged to avoid renders. */
 function groupingsAt(price: number, szDecimals: number, prev: Grouping[]): Grouping[] {
   const full = stepExp(price, null, szDecimals);
@@ -177,10 +202,10 @@ function buildSlots(side: Side, bids: boolean, max: bigint, pxDecimals: number, 
   return slots;
 }
 
-/** Merge the two cadences: fast top-of-book verbatim, then deep levels strictly beyond the last fast
- *  price on each side. Overlapping deep levels are dropped as up to ~5s older than the fast ones. */
-export function mergeSnapshots(fast: WireL2Book | null, deep: WireL2Book | null): WireL2Book | null {
+/** Fast top-of-book verbatim, then deep levels beyond it; a grouped deep book at another step is dropped. */
+export function mergeSnapshots(fast: WireL2Book | null, deep: WireL2Book | null, grouped: boolean): WireL2Book | null {
   if (!fast || !deep) return fast ?? deep;
+  if (grouped && gridExp(fast) !== gridExp(deep)) return fast;
   const tail = (top: WireLevel[], rest: WireLevel[], bids: boolean) => {
     if (!top.length) return rest;
     const edge = Number(top[top.length - 1].px);

@@ -4,6 +4,7 @@ import {
   deriveBook,
   deriveTrades,
   EMPTY_BOOK,
+  fitsGrouping,
   HISTORY,
   mergeSnapshots,
   prependTrades,
@@ -76,7 +77,7 @@ describe("deriveBook", () => {
     // Always at full precision's decimals, so the cell keeps its width as the spread moves.
     const ethGrouped = (spread: string) => derive({ ...snap([["2560.0", "1"]], [["2570.0", "1"]]), spread }, null, { ...eth, nSigFigs: 3 }).spread;
     expect([ethGrouped("0.1"), ethGrouped("1.0")]).toEqual(["0.1", "1.0"]);
-    expect(mergeSnapshots(grouped, snap([["82000.0", "1"]], [["85000.0", "1"]]))!.spread).toBe("1.0");
+    expect(mergeSnapshots(grouped, snap([["82000.0", "1"]], [["85000.0", "1"]]), true)!.spread).toBe("1.0");
   });
 
   it("leaves spread blank when a side is empty", () => {
@@ -200,6 +201,30 @@ describe("flashes", () => {
   });
 });
 
+describe("fitsGrouping", () => {
+  const grouped = (step: number, spread = "1.0") => ({
+    ...snap([0, 1, 2].map((i) => [`${83000 - i * step}.0`, "1"]), [0, 1, 2].map((i) => [`${83000 + (i + 1) * step}.0`, "1"])),
+    spread,
+  });
+
+  it("tells full precision from grouped books by the spread field grouped ones carry", () => {
+    expect(fitsGrouping(snap([["83452.0", "1"]], [["83453.0", "1"]]), null, 5)).toBe(true);
+    expect(fitsGrouping(grouped(1000), null, 5)).toBe(false);
+    expect(fitsGrouping(snap([["83452.0", "1"]], [["83453.0", "1"]]), 4, 5)).toBe(false);
+  });
+
+  it("rejects a book at a finer or a coarser step than the grouping's", () => {
+    expect(fitsGrouping(grouped(100), 3, 5)).toBe(true);
+    expect(fitsGrouping(grouped(10), 3, 5)).toBe(false); // finer: off the 100 grid
+    expect(fitsGrouping(grouped(1000), 3, 5)).toBe(false); // coarser: on it, but every price on 1,000
+  });
+
+  it("accepts either step when the touch straddles a power of ten", () => {
+    const at = (step: number) => ({ ...snap([[`${100000 - step}.0`, "1"]], [["100000.0", "1"], [`${100000 + step}.0`, "1"]]), spread: "1.0" });
+    expect([fitsGrouping(at(100), 3, 5), fitsGrouping(at(1000), 3, 5)]).toEqual([true, true]);
+  });
+});
+
 describe("mergeSnapshots", () => {
   const fast = snap([["100.0", "1"], ["99.9", "1"]], [["100.1", "1"], ["100.2", "1"]]);
   const deep = snap(
@@ -208,27 +233,34 @@ describe("mergeSnapshots", () => {
   );
 
   it("returns whichever snapshot exists when the other is missing", () => {
-    expect(mergeSnapshots(fast, null)).toBe(fast);
-    expect(mergeSnapshots(null, deep)).toBe(deep);
-    expect(mergeSnapshots(null, null)).toBeNull();
+    expect(mergeSnapshots(fast, null, false)).toBe(fast);
+    expect(mergeSnapshots(null, deep, false)).toBe(deep);
+    expect(mergeSnapshots(null, null, false)).toBeNull();
   });
 
   it("keeps fast levels verbatim and appends only deep levels beyond them", () => {
-    const merged = mergeSnapshots(fast, deep)!;
+    const merged = mergeSnapshots(fast, deep, false)!;
     expect(merged.levels[0].map((l) => `${l.px}@${l.sz}`)).toEqual(["100.0@1", "99.9@1", "99.8@9", "99.7@9"]);
     expect(merged.levels[1].map((l) => `${l.px}@${l.sz}`)).toEqual(["100.1@1", "100.2@1", "100.3@9", "100.4@9"]);
   });
 
   it("drops every deep level overlapping the fast range after a sharp move", () => {
     // Price fell: the deep snapshot's asks all sit above the fast top, its bids all overlap.
-    const moved = mergeSnapshots(snap([["95.0", "1"], ["94.9", "1"]], [["95.1", "1"], ["95.2", "1"]]), deep)!;
+    const moved = mergeSnapshots(snap([["95.0", "1"], ["94.9", "1"]], [["95.1", "1"], ["95.2", "1"]]), deep, false)!;
     expect(moved.levels[0].map((l) => l.px)).toEqual(["95.0", "94.9"]);
     expect(moved.levels[1].map((l) => l.px)).toEqual(["95.1", "95.2", "100.0", "100.1", "100.2", "100.3", "100.4"]);
   });
 
   it("falls back to the whole deep side when the fast side is empty", () => {
-    const merged = mergeSnapshots(snap([], [["100.1", "1"]]), deep)!;
+    const merged = mergeSnapshots(snap([], [["100.1", "1"]]), deep, false)!;
     expect(merged.levels[0]).toHaveLength(5);
+  });
+
+  it("doesn't merge grouped books at different steps (the price crossed a power of ten between them)", () => {
+    const fine = snap([["99900.0", "1"], ["99800.0", "1"]], [["100000.0", "1"]]); // step 100
+    const coarse = snap([["99000.0", "9"], ["98000.0", "9"]], [["100000.0", "9"], ["101000.0", "9"]]); // step 1000
+    expect(mergeSnapshots(fine, coarse, true)).toBe(fine);
+    expect(mergeSnapshots(fine, snap([["99700.0", "9"]], [["100100.0", "9"]]), true)!.levels[0]).toHaveLength(3);
   });
 });
 
